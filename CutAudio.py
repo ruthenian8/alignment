@@ -32,22 +32,16 @@ def read_docx(filename:str) -> BeautifulSoup:
 # In[5]:
 
 
-def get_paras(soup:BeautifulSoup) -> List[Tag]:
-    paras:List[Tag] = [i for i in soup.find_all("w:p")]
-    return paras
+def get_paragraph_strings(soup:BeautifulSoup) -> List[Tag]:
+    paragraph:List[Tag] = [i for i in soup.find_all("w:p")]
+    return [i.text for i in paragraph]
 
 
 # In[137]:
 
 
-def codes_from_paras(paras:List[Tag]) -> List[dict]:
-    filtered:List[Tag] = [i for i in paras if re.match(r"[\d:\.,]{12}[ -–]", i.text.strip())]
-    # text_entries:List[str] = []
-    # for para in filtered:
-        # pieces = [x.text for x in para.find_all("w:t")]
-        # good_pieces = [n for n in filter(lambda x: False if re.search(r"начало|продолжение|расписано", x, re.IGNORECASE) or re.search(r"[\d:\.,]{12}", x) else True, pieces)]
-        # text_entries.append(" ".join(good_pieces).replace("  ", " "))
-    texts:List[str] = [i.text for i in filtered]
+def codes_from_paragraph(paragraph:List[str]) -> List[dict]:
+    texts:List[str] = [i for i in paragraph if re.match(r"[\d:\.,]{12}[ -–]", i.strip())]
     conts:List[str] = []
     for text in texts:
         cleaned = clean = re.sub(r"[^\d\w]*$", "", text)
@@ -72,22 +66,6 @@ def transform_df(codes:dict):
 # In[41]:
 
 
-def code_to_seconds(code:str):
-    integral_part = code[:8].split(":")
-    hours = int(integral_part[0])
-    minutes = int(integral_part[1])
-    seconds = int(integral_part[2])
-    milli = int(re.search(r"\d{2,3}$", code).group())
-    if milli > 500:
-        seconds += 1
-    seconds += minutes * 60
-    seconds += hours * 3600
-    return seconds
-
-
-# In[158]:
-
-
 class Mapper():
     """Initialize with the name of the audio file"""
     def __init__(self, filename:str) -> None:
@@ -103,8 +81,8 @@ class Mapper():
             soup = read_docx(file + ".docx")
         except:
             raise OSError(f"file not found: {file + '.docx'}")
-        paras = get_paras(soup)
-        codes = codes_from_paras(paras)
+        paragraph_strings = get_paragraph_strings(soup)
+        codes = codes_from_paragraph(paragraph_strings)
         for i in range(len(codes)):
             codes[i].update({"name":file + "No" + str(i) + self.ext})
         self.table = transform_df(codes)
@@ -120,9 +98,8 @@ class Mapper():
         if not os.path.isdir(self.shortened):
             os.system(f"mkdir {shlex.quote(self.shortened)}")
         for idx in range(len(names) - 1):
-            range_ = str(code_to_seconds(codes[idx+1]) - code_to_seconds(codes[idx]))
             output = shlex.quote(os.path.join(self.shortened, self.shortened+ "No" +str(idx)+self.ext))
-            command = f"ffmpeg -ss {codes[idx]} -i {shlex.quote(self.filename)} -t {range_} -c copy -avoid_negative_ts 1 {output}"
+            command = f"ffmpeg -ss {codes[idx]} -i {shlex.quote(self.filename)} -to {codes[idx+1]} -c copy -avoid_negative_ts 1 {output}"
             os.system(command)
             # print(command)
         output = shlex.quote(os.path.join(self.shortened, self.shortened+str(len(codes)-1)+self.ext))
@@ -194,18 +171,4 @@ def main(directory):
 if __name__ == "__main__":
     main(sys.argv[1])
 
-
-# In[138]:
-
-
-# ag = read_docx("BIF_.docx")
-# paras = get_paras(ag)
-# codes = codes_from_paras(paras)
-# bif = transform_df(codes)
-# bif.sort_index(ascending=False)
-# bif.loc[bif.loc[3,"prev"],:]
-# np.where(bif["start"].apply(lambda x: x not in bif["cont"].values) == False)
-# a="KIL&KVI_1.WMA"
-# f"\'$PWD/{a}\'"
-# bif.loc[bif["prev"].isna()]
 
