@@ -68,15 +68,28 @@ def transform_df(codes:dict):
 
 class Mapper():
     """Initialize with the name of the audio file"""
-    def __init__(self, filename:str) -> None:
+    def __init__(self, filename: str) -> None:
+        self.audio_path = Path(filename).resolve()
         self.filename = filename
-        self.ext = re.search(r"\..+?$", filename).group()
-        self.shortened = re.sub("\..+?$", "", filename)
+        self.ext = self.audio_path.suffix
+        self.base_name = self.audio_path.stem
+        self.transcript_path = self.audio_path.parent.parent / "indices" / (self.base_name + ".txt")
         self.table = None
-        self.parse_file(self.shortened)
+        self.parse_txt_file(str(self.transcript_path))
+        # self.parse_docx_file(self.base_name)
         self.is_processed = False
     
-    def parse_file(self, file:str, save=False) -> None:
+    def parse_txt_file(self, file: str, save=False) -> None:
+        with open(file) as fhandle:
+            paragraph_strings = fhandle.read().splitlines()
+        codes = codes_from_paragraph(paragraph_strings)
+        for i in range(len(codes)):
+            codes[i].update({"name":file + "No" + str(i) + self.ext})
+        self.table = transform_df(codes)
+        if save:
+            self.save()
+
+    def parse_docx_file(self, file: str, save=False) -> None:
         try:
             soup = read_docx(file + ".docx")
         except:
@@ -95,22 +108,22 @@ class Mapper():
         names = self.table["name"].tolist()
         codes = self.table["start"].tolist()
         if len(names) == 0: return
-        if not os.path.isdir(self.shortened):
-            os.system(f"mkdir {shlex.quote(self.shortened)}")
+        if not os.path.isdir(self.base_name):
+            os.system(f"mkdir {shlex.quote(self.base_name)}")
         for idx in range(len(names) - 1):
-            output = shlex.quote(os.path.join(self.shortened, self.shortened+ "No" +str(idx)+self.ext))
+            output = shlex.quote(os.path.join(self.base_name, self.base_name+ "No" +str(idx)+self.ext))
             command = f"ffmpeg -ss {codes[idx]} -i {shlex.quote(self.filename)} -to {codes[idx+1]} -c copy -avoid_negative_ts 1 {output}"
             os.system(command)
             # print(command)
-        output = shlex.quote(os.path.join(self.shortened, self.shortened+str(len(codes)-1)+self.ext))
+        output = shlex.quote(os.path.join(self.base_name, self.base_name+str(len(codes)-1)+self.ext))
         command = f"ffmpeg -ss {codes[-1]} -i {shlex.quote(self.filename)} -c copy -avoid_negative_ts 1 {output}"
         # print(command)
         os.system(command)
         self.is_processed = True
         if download:
-            command = f"zip -r {shlex.quote('/content/'+self.shortened+'.zip')} . -i {shlex.quote('./'+self.shortened+'*')}"
+            command = f"zip -r {shlex.quote('/content/'+self.base_name+'.zip')} . -i {shlex.quote('./'+self.base_name+'*')}"
             os.system(command)
-            files.download(self.shortened + ".zip")
+            files.download(self.base_name + ".zip")
             
     def reverse_concat(self, save=False):
         if not self.is_processed:
@@ -119,11 +132,11 @@ class Mapper():
         for _, row in revers.iterrows():
             if row["prev"] == "":
                 continue
-            prev_ = "\'$PWD/" + os.path.join(self.shortened, revers.loc[row["prev"], "name"]) + "\'"
-            next_ = "\'$PWD/" + os.path.join(self.shortened, row["name"]) + "\'"
+            prev_ = "\'$PWD/" + os.path.join(self.base_name, revers.loc[row["prev"], "name"]) + "\'"
+            next_ = "\'$PWD/" + os.path.join(self.base_name, row["name"]) + "\'"
             sub = f'file {prev_}\\nfile {next_}'
             temporary = "/tmp/" + revers.loc[row["prev"], "name"]
-            command = f'echo "{sub}" > $PWD/temp.txt; ffmpeg -y -f concat -safe 0 -i $PWD/temp.txt -c copy {temporary}; mv {temporary} {"$PWD/" + os.path.join(self.shortened, revers.loc[row["prev"], "name"])};'
+            command = f'echo "{sub}" > $PWD/temp.txt; ffmpeg -y -f concat -safe 0 -i $PWD/temp.txt -c copy {temporary}; mv {temporary} {"$PWD/" + os.path.join(self.base_name, revers.loc[row["prev"], "name"])};'
             print(command)
             os.system(command)
         else:
@@ -134,13 +147,13 @@ class Mapper():
 # subprocess.call('/bin/bash -c "$GREPDB"', shell=True, env={'GREPDB': 'echo 123'})            
     def do_cleanup(self):
         self.table = self.table.loc[self.table["prev"] == ""]
-        for filename in os.listdir(self.shortened):
+        for filename in os.listdir(self.base_name):
             if filename not in self.table["name"].values:
-                command = f"rm {shlex.quote(os.path.join(self.shortened, filename))}"
+                command = f"rm {shlex.quote(os.path.join(self.base_name, filename))}"
                 os.system(command)
 
     def save(self):
-        self.table.to_excel(os.path.join(self.shortened, self.shortened + ".xlsx"), index=True)
+        self.table.to_excel(os.path.join(self.base_name, self.base_name + ".xlsx"), index=True)
 
 
 # In[ ]:
@@ -149,7 +162,7 @@ class Mapper():
 def main(directory):
     files = os.listdir(directory)
     for file2parse in files:
-        if not re.search(r"\.wma$|\.mp3$", file2parse, re.IGNORECASE):
+        if not re.search(r"\.wav$|\.WAV$", file2parse, re.IGNORECASE):
             continue
         try:
             mapper = Mapper(file2parse)
