@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "alignment"
+version = "0.1.0"
+requires-python = ">=3.9"
+dependencies = [
+    "pandas",
+    "beautifulsoup4",
+    "lxml",
+    "rapidfuzz",
+    "scikit-learn",
+    "scipy",
+    "numpy",
+]
+
+[project.scripts]
+alignment = "alignment.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["alignment*"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
