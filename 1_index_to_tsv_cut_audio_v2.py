@@ -1,6 +1,10 @@
 #!/usr/bin/env python
 # coding: utf-8
-
+"""
+Read a plaintext audio index.
+Cut the audio by timestamps from the index.
+Convert the plaintext index to tsv.
+"""
 from __future__ import annotations
 
 import logging

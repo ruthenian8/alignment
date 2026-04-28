@@ -1,20 +1,27 @@
 #!/usr/bin/env python
 # coding: utf-8
+"""
+Read a plaintext audio index.
+Cut the audio by timestamps from the index.
+Convert the plaintext index to tsv.
+"""
 
-# In[56]:
-
-# import subprocess
-import shlex
-import numpy as np
-import pandas as pd
+import subprocess
 import re
 import zipfile
 import os
 import sys
-from bs4 import BeautifulSoup
+import shlex
+
+from pathlib import Path
 from typing import List
+
+import numpy as np
+import pandas as pd
+
+from bs4 import BeautifulSoup
 from bs4.element import Tag
-#from google.colab import files
+# from google.colab import files
 
 
 # In[2]:
@@ -69,11 +76,14 @@ def transform_df(codes:dict):
 class Mapper():
     """Initialize with the name of the audio file"""
     def __init__(self, filename: str) -> None:
+        print(filename)
         self.audio_path = Path(filename).resolve()
         self.filename = filename
         self.ext = self.audio_path.suffix
         self.base_name = self.audio_path.stem
         self.transcript_path = self.audio_path.parent.parent / "indices" / (self.base_name + ".txt")
+        self.dir_path = self.audio_path.parent / self.base_name
+        self.dir_path.mkdir(exist_ok=True)
         self.table = None
         self.parse_txt_file(str(self.transcript_path))
         # self.parse_docx_file(self.base_name)
@@ -84,7 +94,7 @@ class Mapper():
             paragraph_strings = fhandle.read().splitlines()
         codes = codes_from_paragraph(paragraph_strings)
         for i in range(len(codes)):
-            codes[i].update({"name":file + "No" + str(i) + self.ext})
+            codes[i].update({"name": self.base_name + "No" + str(i) + self.ext})
         self.table = transform_df(codes)
         if save:
             self.save()
@@ -97,7 +107,7 @@ class Mapper():
         paragraph_strings = get_paragraph_strings(soup)
         codes = codes_from_paragraph(paragraph_strings)
         for i in range(len(codes)):
-            codes[i].update({"name":file + "No" + str(i) + self.ext})
+            codes[i].update({"name": self.base_name + "No" + str(i) + self.ext})
         self.table = transform_df(codes)
         if save:
             self.save()
@@ -108,22 +118,32 @@ class Mapper():
         names = self.table["name"].tolist()
         codes = self.table["start"].tolist()
         if len(names) == 0: return
-        if not os.path.isdir(self.base_name):
-            os.system(f"mkdir {shlex.quote(self.base_name)}")
         for idx in range(len(names) - 1):
-            output = shlex.quote(os.path.join(self.base_name, self.base_name+ "No" +str(idx)+self.ext))
-            command = f"ffmpeg -ss {codes[idx]} -i {shlex.quote(self.filename)} -to {codes[idx+1]} -c copy -avoid_negative_ts 1 {output}"
-            os.system(command)
-            # print(command)
-        output = shlex.quote(os.path.join(self.base_name, self.base_name+str(len(codes)-1)+self.ext))
-        command = f"ffmpeg -ss {codes[-1]} -i {shlex.quote(self.filename)} -c copy -avoid_negative_ts 1 {output}"
-        # print(command)
-        os.system(command)
+            output = shlex.quote(str(self.dir_path / (self.base_name + "No" + str(idx) + self.ext)))
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-i", shlex.quote(self.filename),
+                "-ss", codes[idx],
+                "-to", codes[idx+1],
+                "-c", "copy",
+                "-avoid_negative_ts", "1",
+                output
+            ]
+            subprocess.run(cmd, check=True, capture_output=True)
+
+        output = shlex.quote(str(self.dir_path / (self.base_name + "No" + str(len(codes) - 1) + self.ext)))
+        cmd = [
+                "ffmpeg",
+                "-y",
+                "-i", shlex.quote(self.filename),
+                "-ss", codes[-1],
+                "-c", "copy",
+                "-avoid_negative_ts", "1",
+                output
+        ]
+        subprocess.run(cmd, check=True, capture_output=True)
         self.is_processed = True
-        if download:
-            command = f"zip -r {shlex.quote('/content/'+self.base_name+'.zip')} . -i {shlex.quote('./'+self.base_name+'*')}"
-            os.system(command)
-            files.download(self.base_name + ".zip")
             
     def reverse_concat(self, save=False):
         if not self.is_processed:
@@ -132,13 +152,13 @@ class Mapper():
         for _, row in revers.iterrows():
             if row["prev"] == "":
                 continue
-            prev_ = "\'$PWD/" + os.path.join(self.base_name, revers.loc[row["prev"], "name"]) + "\'"
-            next_ = "\'$PWD/" + os.path.join(self.base_name, row["name"]) + "\'"
+            prev_ = "\'" + str(self.dir_path / revers.loc[row["prev"], "name"]) + "\'"
+            next_ = "\'" + str(self.dir_path / row["name"]) + "\'"
             sub = f'file {prev_}\\nfile {next_}'
             temporary = "/tmp/" + revers.loc[row["prev"], "name"]
-            command = f'echo "{sub}" > $PWD/temp.txt; ffmpeg -y -f concat -safe 0 -i $PWD/temp.txt -c copy {temporary}; mv {temporary} {"$PWD/" + os.path.join(self.base_name, revers.loc[row["prev"], "name"])};'
-            print(command)
+            command = f'echo "{sub}" > $PWD/temp.txt; ffmpeg -y -f concat -safe 0 -i $PWD/temp.txt -c copy {temporary}; mv {temporary} {str(self.dir_path / revers.loc[row["prev"], "name"])};'
             os.system(command)
+            print(command)
         else:
             print("done")
             self.do_cleanup()
@@ -147,25 +167,25 @@ class Mapper():
 # subprocess.call('/bin/bash -c "$GREPDB"', shell=True, env={'GREPDB': 'echo 123'})            
     def do_cleanup(self):
         self.table = self.table.loc[self.table["prev"] == ""]
-        for filename in os.listdir(self.base_name):
+        for filename in os.listdir(str(self.dir_path)):
             if filename not in self.table["name"].values:
-                command = f"rm {shlex.quote(os.path.join(self.base_name, filename))}"
+                command = f"rm {shlex.quote(str(self.dir_path / filename))}"
                 os.system(command)
 
     def save(self):
-        self.table.to_excel(os.path.join(self.base_name, self.base_name + ".xlsx"), index=True)
+        self.table.to_excel(str(self.dir_path / (self.base_name + ".xlsx")), index=True)
 
 
 # In[ ]:
 
 
 def main(directory):
-    files = os.listdir(directory)
+    files = [i for i in os.listdir(directory)]
     for file2parse in files:
         if not re.search(r"\.wav$|\.WAV$", file2parse, re.IGNORECASE):
             continue
         try:
-            mapper = Mapper(file2parse)
+            mapper = Mapper(str(Path(directory) / file2parse))
             mapper.process_file()
             mapper.reverse_concat()
             mapper.save()
