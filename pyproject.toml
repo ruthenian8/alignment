@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "alignment"
+version = "0.1.0"
+description = "Build aligned speech-corpus clips from indexed audio and transcripts."
+requires-python = ">=3.10"
+
+[project.scripts]
+alignment = "alignment.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["alignment*"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+extend-exclude = ["legacy", "notebooks"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

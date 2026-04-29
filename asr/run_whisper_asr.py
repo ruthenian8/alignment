@@ -2,20 +2,35 @@ from __future__ import annotations
 
 import argparse
 import logging
-from typing import List
 
 import torch
+from asr_common import (
+    add_shared_args,
+    create_dataloader,
+    finalize_and_write,
+    load_items_from_args,
+    torch_dtype_from_name,
+)
 from tqdm import tqdm
 from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
-
-from asr_common import add_shared_args, create_dataloader, finalize_and_write, load_items_from_args, torch_dtype_from_name
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Batched Whisper ASR inference over many short audio files.")
     add_shared_args(parser)
-    parser.add_argument("--attn-implementation", type=str, default="sdpa", choices=["eager", "sdpa", "flash_attention_2"], help="Transformer attention backend if supported.")
-    parser.add_argument("--chunk-length-s", type=float, default=0.0, help="Optional long-audio chunking. Keep 0 for 2-10 second clips.")
+    parser.add_argument(
+        "--attn-implementation",
+        type=str,
+        default="sdpa",
+        choices=["eager", "sdpa", "flash_attention_2"],
+        help="Transformer attention backend if supported.",
+    )
+    parser.add_argument(
+        "--chunk-length-s",
+        type=float,
+        default=0.0,
+        help="Optional long-audio chunking. Keep 0 for 2-10 second clips.",
+    )
     parser.add_argument("--max-new-tokens", type=int, default=128)
     return parser.parse_args()
 
@@ -51,7 +66,7 @@ def main() -> None:
     if hasattr(processor, "get_decoder_prompt_ids"):
         forced_decoder_ids = processor.get_decoder_prompt_ids(language=args.language, task=args.task)
 
-    results: List[dict] = []
+    results: list[dict] = []
     autocast_enabled = device.type == "cuda" and dtype in (torch.float16, torch.bfloat16)
 
     for batch in tqdm(loader, desc="whisper"):
@@ -62,7 +77,10 @@ def main() -> None:
         )
         input_features = inputs.input_features.to(device=device, dtype=dtype, non_blocking=True)
 
-        with torch.inference_mode(), torch.autocast(device_type=device.type, dtype=dtype, enabled=autocast_enabled):
+        with (
+            torch.inference_mode(),
+            torch.autocast(device_type=device.type, dtype=dtype, enabled=autocast_enabled),
+        ):
             generated = model.generate(
                 input_features,
                 forced_decoder_ids=forced_decoder_ids,
@@ -70,14 +88,16 @@ def main() -> None:
             )
 
         texts = processor.batch_decode(generated, skip_special_tokens=True)
-        for path, text, dur in zip(batch["paths"], texts, batch["durations_s"]):
-            results.append({
-                "path": path,
-                "text": text.strip(),
-                "duration_s": round(float(dur), 3),
-                "model_id": args.model_id,
-                "model_type": "whisper",
-            })
+        for path, text, dur in zip(batch["paths"], texts, batch["durations_s"], strict=True):
+            results.append(
+                {
+                    "path": path,
+                    "text": text.strip(),
+                    "duration_s": round(float(dur), 3),
+                    "model_id": args.model_id,
+                    "model_type": "whisper",
+                }
+            )
 
     finalize_and_write(args.output, results)
 

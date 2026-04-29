@@ -6,13 +6,13 @@ import json
 import logging
 import math
 import os
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, Iterator, List, Optional, Sequence
 
 import torch
 import torchaudio
-from torch.utils.data import Dataset, DataLoader, Sampler
+from torch.utils.data import DataLoader, Dataset, Sampler
 
 AUDIO_EXTENSIONS = {".wav", ".flac", ".mp3", ".m4a", ".ogg", ".opus", ".webm"}
 TARGET_SR = 16_000
@@ -41,7 +41,7 @@ class AudioDataset(Dataset):
     def __len__(self) -> int:
         return len(self.items)
 
-    def _get_resampler(self, orig_sr: int) -> Optional[torchaudio.transforms.Resample]:
+    def _get_resampler(self, orig_sr: int) -> torchaudio.transforms.Resample | None:
         if orig_sr == self.target_sr:
             return None
         if orig_sr not in self._resamplers:
@@ -67,7 +67,7 @@ class AudioDataset(Dataset):
         }
 
 
-class DurationBucketBatchSampler(Sampler[List[int]]):
+class DurationBucketBatchSampler(Sampler[list[int]]):
     """
     Groups sorted-by-duration files into batches constrained by both item count
     and total audio seconds. This keeps short clips highly batched while avoiding
@@ -86,14 +86,14 @@ class DurationBucketBatchSampler(Sampler[List[int]]):
         self.max_batch_audio_s = max_batch_audio_s
         self.shuffle = shuffle
 
-    def __iter__(self) -> Iterator[List[int]]:
+    def __iter__(self) -> Iterator[list[int]]:
         import random
 
         pairs = list(enumerate(self.items))
         pairs.sort(key=lambda x: x[1].duration_s)
 
-        batches: List[List[int]] = []
-        current: List[int] = []
+        batches: list[list[int]] = []
+        current: list[int] = []
         current_audio_s = 0.0
         for idx, item in pairs:
             if current and (
@@ -134,10 +134,10 @@ def collate_audio(batch: Sequence[dict]) -> dict:
     }
 
 
-def discover_audio_files(input_dir: Optional[str], manifest: Optional[str], glob_pattern: str) -> List[Path]:
-    paths: List[Path] = []
+def discover_audio_files(input_dir: str | None, manifest: str | None, glob_pattern: str) -> list[Path]:
+    paths: list[Path] = []
     if manifest:
-        with open(manifest, "r", encoding="utf-8") as f:
+        with open(manifest, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -165,8 +165,8 @@ def discover_audio_files(input_dir: Optional[str], manifest: Optional[str], glob
     return deduped
 
 
-def build_items(paths: Sequence[Path]) -> List[AudioItem]:
-    items: List[AudioItem] = []
+def build_items(paths: Sequence[Path]) -> list[AudioItem]:
+    items: list[AudioItem] = []
 
     for p in paths:
         try:
@@ -179,6 +179,7 @@ def build_items(paths: Sequence[Path]) -> List[AudioItem]:
         items.append(AudioItem(path=p, duration_s=duration_s))
 
     return items
+
 
 def create_dataloader(
     items: Sequence[AudioItem],
@@ -232,19 +233,46 @@ def write_results(path: str, rows: Sequence[dict]) -> None:
 
 
 def add_shared_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
-    parser.add_argument("--input-dir", type=str, default=None, help="Directory scanned recursively for audio files.")
-    parser.add_argument("--manifest", type=str, default=None, help="Text file with one path per line or JSONL with a path field.")
+    parser.add_argument(
+        "--input-dir", type=str, default=None, help="Directory scanned recursively for audio files."
+    )
+    parser.add_argument(
+        "--manifest",
+        type=str,
+        default=None,
+        help="Text file with one path per line or JSONL with a path field.",
+    )
     parser.add_argument("--glob", type=str, default="*", help="Recursive glob applied under --input-dir.")
     parser.add_argument("--output", type=str, required=True, help="Output .jsonl or .csv file.")
     parser.add_argument("--model-id", type=str, required=True, help="HF model id or local path.")
-    parser.add_argument("--language", type=str, default=None, help="Language or dialect tag if supported by the model.")
-    parser.add_argument("--task", type=str, default="transcribe", choices=["transcribe", "translate"], help="Used mainly by Whisper.")
+    parser.add_argument(
+        "--language", type=str, default=None, help="Language or dialect tag if supported by the model."
+    )
+    parser.add_argument(
+        "--task",
+        type=str,
+        default="transcribe",
+        choices=["transcribe", "translate"],
+        help="Used mainly by Whisper.",
+    )
     parser.add_argument("--device", type=str, default="cuda", help="cuda, cuda:0, cpu, etc.")
-    parser.add_argument("--dtype", type=str, default="float16", choices=["float16", "bfloat16", "float32"], help="Model compute dtype.")
+    parser.add_argument(
+        "--dtype",
+        type=str,
+        default="float16",
+        choices=["float16", "bfloat16", "float32"],
+        help="Model compute dtype.",
+    )
     parser.add_argument("--max-batch-size", type=int, default=32, help="Maximum utterances per batch.")
-    parser.add_argument("--max-batch-audio-s", type=float, default=180.0, help="Total audio seconds per batch cap.")
-    parser.add_argument("--num-workers", type=int, default=min(8, os.cpu_count() or 1), help="CPU workers for audio decoding.")
-    parser.add_argument("--prefetch-factor", type=int, default=4, help="DataLoader prefetch factor per worker.")
+    parser.add_argument(
+        "--max-batch-audio-s", type=float, default=180.0, help="Total audio seconds per batch cap."
+    )
+    parser.add_argument(
+        "--num-workers", type=int, default=min(8, os.cpu_count() or 1), help="CPU workers for audio decoding."
+    )
+    parser.add_argument(
+        "--prefetch-factor", type=int, default=4, help="DataLoader prefetch factor per worker."
+    )
     parser.add_argument("--pin-memory", action="store_true", help="Pin host memory before GPU transfer.")
     parser.add_argument("--limit", type=int, default=None, help="Optional cap on number of audio files.")
     parser.add_argument("--verbose", action="store_true")
@@ -269,7 +297,7 @@ def torch_dtype_from_name(name: str) -> torch.dtype:
     return mapping[name]
 
 
-def load_items_from_args(args: argparse.Namespace) -> List[AudioItem]:
+def load_items_from_args(args: argparse.Namespace) -> list[AudioItem]:
     validate_args(args)
     setup_logging(args.verbose)
     paths = discover_audio_files(args.input_dir, args.manifest, args.glob)

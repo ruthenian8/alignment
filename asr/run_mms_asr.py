@@ -2,19 +2,25 @@ from __future__ import annotations
 
 import argparse
 import logging
-from typing import List
 
 import torch
+from asr_common import (
+    add_shared_args,
+    create_dataloader,
+    finalize_and_write,
+    load_items_from_args,
+    torch_dtype_from_name,
+)
 from tqdm import tqdm
-from transformers import Wav2Vec2ForCTC, AutoProcessor
-
-from asr_common import add_shared_args, create_dataloader, finalize_and_write, load_items_from_args, torch_dtype_from_name
+from transformers import AutoProcessor, Wav2Vec2ForCTC
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Batched MMS ASR inference over many short audio files.")
     add_shared_args(parser)
-    parser.add_argument("--language-code", type=str, default=None, help="MMS adapter language code such as rus, deu, etc.")
+    parser.add_argument(
+        "--language-code", type=str, default=None, help="MMS adapter language code such as rus, deu, etc."
+    )
     return parser.parse_args()
 
 
@@ -49,7 +55,7 @@ def main() -> None:
         pin_memory=args.pin_memory,
     )
 
-    results: List[dict] = []
+    results: list[dict] = []
     autocast_enabled = device.type == "cuda" and dtype in (torch.float16, torch.bfloat16)
 
     for batch in tqdm(loader, desc="mms"):
@@ -64,20 +70,25 @@ def main() -> None:
         if hasattr(inputs, "attention_mask") and inputs.attention_mask is not None:
             attention_mask = inputs.attention_mask.to(device=device, non_blocking=True)
 
-        with torch.inference_mode(), torch.autocast(device_type=device.type, dtype=dtype, enabled=autocast_enabled):
+        with (
+            torch.inference_mode(),
+            torch.autocast(device_type=device.type, dtype=dtype, enabled=autocast_enabled),
+        ):
             logits = model(input_values, attention_mask=attention_mask).logits
         pred_ids = torch.argmax(logits, dim=-1)
         texts = processor.batch_decode(pred_ids)
 
-        for path, text, dur in zip(batch["paths"], texts, batch["durations_s"]):
-            results.append({
-                "path": path,
-                "text": text.strip(),
-                "duration_s": round(float(dur), 3),
-                "model_id": args.model_id,
-                "model_type": "mms",
-                "language_code": args.language_code,
-            })
+        for path, text, dur in zip(batch["paths"], texts, batch["durations_s"], strict=True):
+            results.append(
+                {
+                    "path": path,
+                    "text": text.strip(),
+                    "duration_s": round(float(dur), 3),
+                    "model_id": args.model_id,
+                    "model_type": "mms",
+                    "language_code": args.language_code,
+                }
+            )
 
     finalize_and_write(args.output, results)
 
