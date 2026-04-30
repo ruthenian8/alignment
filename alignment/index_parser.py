@@ -11,7 +11,7 @@ from .io import INDEX_COLUMNS, write_tsv
 from .srt import normalize_timestamp
 
 TIME_RE = re.compile(r"\d{1,2}:\d{2}:\d{2}[,.]\d{3}")
-START_RE = re.compile(rf"^\s*({TIME_RE.pattern})\s*[-–]\s*(.*)")
+START_RE = re.compile(rf"^\s*({TIME_RE.pattern})(?:\s*[-–]\s*|\s+)?(.*)")
 CONT_RE = re.compile(r"продолж|окончание|начало\s+см", re.IGNORECASE)
 
 

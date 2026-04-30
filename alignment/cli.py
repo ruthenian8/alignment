@@ -44,6 +44,16 @@ def build_parser() -> argparse.ArgumentParser:
     align.add_argument("output_srt", type=Path, help="Output aligned SRT path.")
     align.add_argument("--output-tsv", type=Path, help="Optional output aligned TSV path.")
     align.add_argument("--index-name", default="", help="Index/chunk name recorded in aligned TSV.")
+    align.add_argument(
+        "--use-transcript-speakers",
+        action="store_true",
+        help="Replace SRT speaker codes with bracketed speaker tags from the manual transcript.",
+    )
+    align.add_argument(
+        "--infer-missing-speakers",
+        action="store_true",
+        help="Carry the last bracketed transcript speaker tag forward across following aligned segments.",
+    )
 
     export = subparsers.add_parser("export-corpus", help="Cut audio clips and write text plus manifest.")
     export.add_argument("audio", type=Path, help="Input audio chunk.")
@@ -92,7 +102,13 @@ def main(argv: list[str] | None = None) -> None:
         reorder_tsv(args.input, args.output, max_shift=args.max_shift)
     elif args.command == "align-srt":
         transcript = args.transcript.read_text(encoding="utf-8-sig")
-        aligned = align_srt_file(args.srt, transcript, args.output_srt)
+        aligned = align_srt_file(
+            args.srt,
+            transcript,
+            args.output_srt,
+            use_transcript_speakers=args.use_transcript_speakers,
+            infer_missing_speakers=args.infer_missing_speakers,
+        )
         if args.output_tsv:
             write_aligned_tsv(args.index_name or args.srt.stem, aligned, args.output_tsv)
     elif args.command == "export-corpus":

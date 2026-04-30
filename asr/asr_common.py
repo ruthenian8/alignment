@@ -1,3 +1,5 @@
+"""Shared helpers for optional batched ASR scripts."""
+
 from __future__ import annotations
 
 import argparse
@@ -19,6 +21,7 @@ TARGET_SR = 16_000
 
 
 def setup_logging(verbose: bool = False) -> None:
+    """Configure process-wide logging for ASR scripts."""
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
         level=level,
@@ -28,11 +31,15 @@ def setup_logging(verbose: bool = False) -> None:
 
 @dataclass
 class AudioItem:
+    """Audio path plus duration metadata used for batching."""
+
     path: Path
     duration_s: float
 
 
 class AudioDataset(Dataset):
+    """Load, mono-mix, and resample audio files lazily for inference."""
+
     def __init__(self, items: Sequence[AudioItem], target_sr: int = TARGET_SR):
         self.items = list(items)
         self.target_sr = target_sr
@@ -68,11 +75,7 @@ class AudioDataset(Dataset):
 
 
 class DurationBucketBatchSampler(Sampler[list[int]]):
-    """
-    Groups sorted-by-duration files into batches constrained by both item count
-    and total audio seconds. This keeps short clips highly batched while avoiding
-    pathological padding for the longest clips.
-    """
+    """Group duration-sorted files into batches constrained by count and seconds."""
 
     def __init__(
         self,
@@ -121,6 +124,7 @@ class DurationBucketBatchSampler(Sampler[list[int]]):
 
 
 def collate_audio(batch: Sequence[dict]) -> dict:
+    """Pad variable-length audio tensors and return batch metadata."""
     audios = [x["audio"] for x in batch]
     lengths = torch.tensor([x["num_samples"] for x in batch], dtype=torch.long)
     padded = torch.nn.utils.rnn.pad_sequence(audios, batch_first=True)
@@ -135,9 +139,11 @@ def collate_audio(batch: Sequence[dict]) -> dict:
 
 
 def discover_audio_files(input_dir: str | None, manifest: str | None, glob_pattern: str) -> list[Path]:
+    """Collect audio paths from an input directory and/or path manifest."""
     paths: list[Path] = []
     if manifest:
-        with open(manifest, encoding="utf-8") as f:
+        manifest_path = Path(manifest)
+        with manifest_path.open(encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -147,9 +153,9 @@ def discover_audio_files(input_dir: str | None, manifest: str | None, glob_patte
                     obj = json.loads(line)
                     p = obj.get("path")
                     if p:
-                        paths.append(Path(p))
+                        paths.append(_resolve_manifest_path(manifest_path, p))
                 else:
-                    paths.append(Path(line))
+                    paths.append(_resolve_manifest_path(manifest_path, line))
     if input_dir:
         root = Path(input_dir)
         for p in root.rglob(glob_pattern):
@@ -165,13 +171,24 @@ def discover_audio_files(input_dir: str | None, manifest: str | None, glob_patte
     return deduped
 
 
+def _resolve_manifest_path(manifest_path: Path, value: str) -> Path:
+    """Resolve relative manifest entries against the manifest file directory."""
+    path = Path(value)
+    return path if path.is_absolute() else manifest_path.parent / path
+
+
 def build_items(paths: Sequence[Path]) -> list[AudioItem]:
+    """Build duration metadata for readable audio files."""
     items: list[AudioItem] = []
 
     for p in paths:
         try:
-            waveform, sample_rate = torchaudio.load(str(p))
-            duration_s = waveform.shape[-1] / float(sample_rate)
+            metadata = torchaudio.info(str(p))
+            if metadata.num_frames > 0 and metadata.sample_rate > 0:
+                duration_s = metadata.num_frames / float(metadata.sample_rate)
+            else:
+                waveform, sample_rate = torchaudio.load(str(p))
+                duration_s = waveform.shape[-1] / float(sample_rate)
         except Exception as e:
             logging.warning("Skipping %s: failed to read audio (%s)", p, e)
             continue
@@ -189,6 +206,7 @@ def create_dataloader(
     prefetch_factor: int,
     pin_memory: bool,
 ) -> DataLoader:
+    """Create the duration-bucketed audio dataloader."""
     dataset = AudioDataset(items)
     batch_sampler = DurationBucketBatchSampler(
         items=items,
@@ -211,6 +229,7 @@ def create_dataloader(
 
 
 def write_results(path: str, rows: Sequence[dict]) -> None:
+    """Write ASR result rows as JSONL or CSV."""
     out_path = Path(path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     if out_path.suffix.lower() == ".jsonl":
@@ -233,6 +252,7 @@ def write_results(path: str, rows: Sequence[dict]) -> None:
 
 
 def add_shared_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    """Add common ASR command-line arguments to a parser."""
     parser.add_argument(
         "--input-dir", type=str, default=None, help="Directory scanned recursively for audio files."
     )
@@ -280,6 +300,7 @@ def add_shared_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
 
 
 def validate_args(args: argparse.Namespace) -> None:
+    """Validate common ASR command-line arguments."""
     if not args.input_dir and not args.manifest:
         raise ValueError("Provide at least one of --input-dir or --manifest.")
     if args.max_batch_size < 1:
@@ -289,6 +310,7 @@ def validate_args(args: argparse.Namespace) -> None:
 
 
 def torch_dtype_from_name(name: str) -> torch.dtype:
+    """Map a CLI dtype name to a torch dtype."""
     mapping = {
         "float16": torch.float16,
         "bfloat16": torch.bfloat16,
@@ -297,7 +319,22 @@ def torch_dtype_from_name(name: str) -> torch.dtype:
     return mapping[name]
 
 
+def resolve_device_and_dtype(device_name: str, dtype_name: str) -> tuple[torch.device, torch.dtype]:
+    """Return a usable torch device and dtype, failing early for invalid CUDA use."""
+    device = torch.device(device_name)
+    if device.type == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError(
+            "CUDA was requested but is not available. Use --device cpu or install CUDA support."
+        )
+    dtype = torch_dtype_from_name(dtype_name)
+    if device.type == "cpu" and dtype != torch.float32:
+        logging.warning("Using float32 on CPU instead of %s", dtype_name)
+        dtype = torch.float32
+    return device, dtype
+
+
 def load_items_from_args(args: argparse.Namespace) -> list[AudioItem]:
+    """Load duration metadata for audio files described by CLI arguments."""
     validate_args(args)
     setup_logging(args.verbose)
     paths = discover_audio_files(args.input_dir, args.manifest, args.glob)
@@ -312,5 +349,6 @@ def load_items_from_args(args: argparse.Namespace) -> list[AudioItem]:
 
 
 def finalize_and_write(output_path: str, rows: Sequence[dict]) -> None:
+    """Write output rows and log a short completion message."""
     write_results(output_path, rows)
     logging.info("Wrote %d rows to %s", len(rows), output_path)

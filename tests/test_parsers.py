@@ -8,14 +8,17 @@ from alignment.transcript_parser import parse_transcript_text
 def test_plaintext_index_parses_untranscribed_and_continuation_linking():
     text = """
 00:00:00,000 - Начало. Окончание см. 00:00:10,000
-00:00:05.000 - НЕ РАСПИСАНО
-00:00:10,000 - Окончание.
+00:00:05.000 – НЕ РАСПИСАНО
+00:00:07,500Без пробела и тире.
+00:00:10,000 Окончание.
 """.strip()
     rows = parse_index_text(text, audio_stem="sample")
     assert rows[0]["start"] == "00:00:00.000"
     assert rows[0]["cont"] == "00:00:10.000"
-    assert rows[2]["prev"] == "0"
+    assert rows[3]["prev"] == "0"
     assert rows[1]["trans"] == "False"
+    assert rows[2]["text"] == "00:00:07,500 - Без пробела и тире."
+    assert rows[3]["text"] == "00:00:10,000 - Окончание."
     assert rows[0]["name"] == "sampleNo0.wav"
 
 

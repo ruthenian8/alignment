@@ -1,7 +1,7 @@
 from pathlib import Path
 from unittest.mock import patch
 
-from alignment.align import align_segments, aligned_to_srt
+from alignment.align import align_segments, aligned_to_srt, apply_transcript_speakers
 from alignment.audio import build_cut_command
 from alignment.export import export_segments
 from alignment.srt import parse_srt
@@ -33,6 +33,29 @@ def test_alignment_marks_skipped_segments_explicitly():
     assert aligned[0].transcript_text == ""
 
 
+def test_transcript_speaker_tags_can_replace_srt_speakers():
+    srt = parse_srt(
+        """
+1
+00:00:00,000 --> 00:00:01,000
+[SPEAKER_00]: добрый день
+
+2
+00:00:01,000 --> 00:00:02,000
+[SPEAKER_00]: красный дом
+
+3
+00:00:02,000 --> 00:00:03,000
+[SPEAKER_01]: новый день
+""".strip()
+    )
+    transcript = "[ААК:] до\\брый день кра\\сный дом [РВВ:] но\\вый день"
+    aligned = align_segments(srt, transcript, max_span=4, similarity_threshold=0.2)
+    updated = apply_transcript_speakers(aligned, transcript, infer_missing=True)
+    assert [item.srt.speaker for item in updated] == ["[ААК]:", "[ААК]:", "[РВВ]:"]
+    assert "[ААК]: до\\брый день" in aligned_to_srt(updated)
+
+
 def test_export_builds_deterministic_names_and_ffmpeg_commands(tmp_path: Path):
     original = "1\n00:00:00,000 --> 00:00:01,250\n[SPEAKER_00]: original\n"
     clean = "1\n00:00:00,000 --> 00:00:01,250\n[SPEAKER_00]: clean\n"
@@ -45,3 +68,17 @@ def test_export_builds_deterministic_names_and_ffmpeg_commands(tmp_path: Path):
     assert run.call_args.args[0] == build_cut_command(
         "input.wav", tmp_path / f"{base}.wav", "00:00:00.000", "00:00:01.250"
     )
+
+
+def test_m4a_input_exports_wav_with_transcoding(tmp_path: Path):
+    command = build_cut_command("input.m4a", tmp_path / "clip.wav", "00:00:00.000", "00:00:01.250")
+    assert command[-3:] == ["-c:a", "pcm_s16le", str(tmp_path / "clip.wav")]
+
+
+def test_export_rejects_non_wav_outputs(tmp_path: Path):
+    try:
+        build_cut_command("input.wav", tmp_path / "clip.m4a", "00:00:00.000", "00:00:01.250")
+    except ValueError as error:
+        assert ".wav" in str(error)
+    else:
+        raise AssertionError("Expected non-wav output to be rejected")

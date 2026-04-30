@@ -1,21 +1,35 @@
+"""Run batched MMS CTC ASR over local audio files."""
+
 from __future__ import annotations
 
 import argparse
 import logging
 
 import torch
-from asr_common import (
-    add_shared_args,
-    create_dataloader,
-    finalize_and_write,
-    load_items_from_args,
-    torch_dtype_from_name,
-)
+
+try:
+    from .asr_common import (
+        add_shared_args,
+        create_dataloader,
+        finalize_and_write,
+        load_items_from_args,
+        resolve_device_and_dtype,
+    )
+except ImportError:
+    from asr_common import (
+        add_shared_args,
+        create_dataloader,
+        finalize_and_write,
+        load_items_from_args,
+        resolve_device_and_dtype,
+    )
+
 from tqdm import tqdm
 from transformers import AutoProcessor, Wav2Vec2ForCTC
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse MMS ASR command-line arguments."""
     parser = argparse.ArgumentParser(description="Batched MMS ASR inference over many short audio files.")
     add_shared_args(parser)
     parser.add_argument(
@@ -25,10 +39,10 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Run MMS ASR inference."""
     args = parse_args()
     items = load_items_from_args(args)
-    dtype = torch_dtype_from_name(args.dtype)
-    device = torch.device(args.device)
+    device, dtype = resolve_device_and_dtype(args.device, args.dtype)
 
     logging.info("Loading MMS model: %s", args.model_id)
     processor = AutoProcessor.from_pretrained(args.model_id)

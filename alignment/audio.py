@@ -29,7 +29,11 @@ def ffprobe_duration(path: Path | str) -> float:
 
 def build_cut_command(input_audio: Path | str, output_audio: Path | str, start: str, end: str) -> list[str]:
     """Build the ffmpeg command used to cut one audio clip."""
-    return [
+    input_path = Path(input_audio)
+    output_path = Path(output_audio)
+    if output_path.suffix.lower() != ".wav":
+        raise ValueError("Corpus audio clips must be written as .wav files.")
+    command = [
         "ffmpeg",
         "-y",
         "-ss",
@@ -37,10 +41,13 @@ def build_cut_command(input_audio: Path | str, output_audio: Path | str, start: 
         "-to",
         end,
         "-i",
-        str(input_audio),
+        str(input_path),
         "-map",
         "0:a",
-        "-c:a",
-        "copy",
-        str(output_audio),
     ]
+    if input_path.suffix.lower() == output_path.suffix.lower():
+        command.extend(["-c:a", "copy"])
+    else:
+        command.extend(["-c:a", "pcm_s16le"])
+    command.append(str(output_path))
+    return command

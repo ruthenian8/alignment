@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .io import ALIGNED_COLUMNS, write_tsv
 from .reorder import normalize_for_match
 from .srt import SrtSegment, format_srt, parse_srt
+
+SPEAKER_MARKER_RE = re.compile(r"\[([^\]]{1,300}):\]")
+SPEAKER_CODE_RE = re.compile(r"[A-ZА-ЯЁ]{2,6}")
 
 
 @dataclass(frozen=True)
@@ -30,6 +33,8 @@ class AlignedSegment:
     normalized_text: str
     matched: bool
     score: float
+    transcript_start: int = -1
+    transcript_end: int = -1
 
 
 def tokenize_transcript(text: str) -> list[TranscriptToken]:
@@ -51,6 +56,49 @@ def token_similarity(left: list[str], right: list[str]) -> float:
     right_set = set(right)
     common = len(left_set & right_set)
     return 0.0 if common == 0 else (2 * common) / (len(left_set) + len(right_set))
+
+
+def speaker_tag_from_marker(marker_text: str) -> str:
+    """Extract speaker initials from a bracket marker body."""
+    codes = SPEAKER_CODE_RE.findall(marker_text)
+    return ", ".join(codes)
+
+
+def format_speaker_tag(tag: str) -> str:
+    """Format transcript speaker initials as an SRT speaker prefix."""
+    return f"[{tag}]:"
+
+
+def find_speaker_tag(text: str) -> str:
+    """Find the last valid bracketed speaker tag in a text span."""
+    tags = [speaker_tag_from_marker(match.group(1)) for match in SPEAKER_MARKER_RE.finditer(text)]
+    return next((tag for tag in reversed(tags) if tag), "")
+
+
+def find_speaker_tag_before_span(transcript: str, start: int) -> str:
+    """Find the closest valid speaker marker at or before a transcript span."""
+    if start < 0:
+        return ""
+    search_start = max(0, start - 300)
+    search_end = min(len(transcript), start + 300)
+    candidates = []
+    for match in SPEAKER_MARKER_RE.finditer(transcript[search_start:search_end]):
+        absolute_start = search_start + match.start()
+        absolute_end = search_start + match.end()
+        if absolute_start <= start and (absolute_end <= start or absolute_start == start):
+            tag = speaker_tag_from_marker(match.group(1))
+            if tag:
+                candidates.append(tag)
+    return candidates[-1] if candidates else ""
+
+
+def remove_speaker_markers(text: str) -> str:
+    """Remove bracketed speaker markers while keeping other bracketed transcript notes."""
+
+    def replace_marker(match: re.Match[str]) -> str:
+        return "" if speaker_tag_from_marker(match.group(1)) else match.group(0)
+
+    return re.sub(r"\s+", " ", SPEAKER_MARKER_RE.sub(replace_marker, text)).strip()
 
 
 def align_segments(
@@ -104,11 +152,59 @@ def align_segments(
         if matched and end > start:
             span_text = transcript[tokens[start].start : tokens[end - 1].end]
             normalized = normalize_for_match(span_text)
+            span_start = tokens[start].start
+            span_end = tokens[end - 1].end
         else:
             span_text = ""
             normalized = ""
-        aligned.append(AlignedSegment(segment, span_text, normalized, matched and bool(span_text), score))
+            span_start = -1
+            span_end = -1
+        aligned.append(
+            AlignedSegment(
+                segment,
+                span_text,
+                normalized,
+                matched and bool(span_text),
+                score,
+                span_start,
+                span_end,
+            )
+        )
     return aligned
+
+
+def apply_transcript_speakers(
+    aligned: list[AlignedSegment], transcript: str, *, infer_missing: bool = False
+) -> list[AlignedSegment]:
+    """Update SRT speaker prefixes from bracketed speaker tags in the transcript.
+
+    When ``infer_missing`` is true, a speaker tag found in one aligned span is
+    carried forward until another explicit bracket tag appears.
+    """
+    output: list[AlignedSegment] = []
+    last_tag = ""
+    for item in aligned:
+        tag = ""
+        if item.matched and item.transcript_end >= 0:
+            tag = find_speaker_tag_before_span(transcript, item.transcript_start)
+        if tag:
+            last_tag = tag
+        elif infer_missing:
+            tag = last_tag
+        if tag:
+            item = replace(
+                item,
+                srt=SrtSegment(
+                    item.srt.index,
+                    item.srt.start,
+                    item.srt.end,
+                    format_speaker_tag(tag),
+                    item.srt.text,
+                ),
+                transcript_text=remove_speaker_markers(item.transcript_text),
+            )
+        output.append(item)
+    return output
 
 
 def aligned_to_srt(aligned: list[AlignedSegment], *, fallback_to_srt: bool = True) -> str:
@@ -140,10 +236,17 @@ def aligned_to_rows(index_name: str, aligned: list[AlignedSegment]) -> list[dict
 
 
 def align_srt_file(
-    srt_path: Path | str, transcript_text: str, output_srt: Path | str | None = None
+    srt_path: Path | str,
+    transcript_text: str,
+    output_srt: Path | str | None = None,
+    *,
+    use_transcript_speakers: bool = False,
+    infer_missing_speakers: bool = False,
 ) -> list[AlignedSegment]:
     """Align one SRT file to transcript text and optionally write merged SRT."""
     aligned = align_segments(parse_srt(Path(srt_path).read_text(encoding="utf-8-sig")), transcript_text)
+    if use_transcript_speakers:
+        aligned = apply_transcript_speakers(aligned, transcript_text, infer_missing=infer_missing_speakers)
     if output_srt is not None:
         Path(output_srt).parent.mkdir(parents=True, exist_ok=True)
         Path(output_srt).write_text(aligned_to_srt(aligned), encoding="utf-8")

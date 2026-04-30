@@ -1,21 +1,34 @@
+"""Run batched Whisper ASR over local audio files."""
+
 from __future__ import annotations
 
 import argparse
 import logging
 
 import torch
-from asr_common import (
-    add_shared_args,
-    create_dataloader,
-    finalize_and_write,
-    load_items_from_args,
-    torch_dtype_from_name,
-)
+
+try:
+    from .asr_common import (
+        add_shared_args,
+        create_dataloader,
+        finalize_and_write,
+        load_items_from_args,
+        resolve_device_and_dtype,
+    )
+except ImportError:
+    from asr_common import (
+        add_shared_args,
+        create_dataloader,
+        finalize_and_write,
+        load_items_from_args,
+        resolve_device_and_dtype,
+    )
 from tqdm import tqdm
 from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse Whisper ASR command-line arguments."""
     parser = argparse.ArgumentParser(description="Batched Whisper ASR inference over many short audio files.")
     add_shared_args(parser)
     parser.add_argument(
@@ -25,21 +38,15 @@ def parse_args() -> argparse.Namespace:
         choices=["eager", "sdpa", "flash_attention_2"],
         help="Transformer attention backend if supported.",
     )
-    parser.add_argument(
-        "--chunk-length-s",
-        type=float,
-        default=0.0,
-        help="Optional long-audio chunking. Keep 0 for 2-10 second clips.",
-    )
     parser.add_argument("--max-new-tokens", type=int, default=128)
     return parser.parse_args()
 
 
 def main() -> None:
+    """Run Whisper ASR inference."""
     args = parse_args()
     items = load_items_from_args(args)
-    dtype = torch_dtype_from_name(args.dtype)
-    device = torch.device(args.device)
+    device, dtype = resolve_device_and_dtype(args.device, args.dtype)
 
     logging.info("Loading Whisper model: %s", args.model_id)
     model = AutoModelForSpeechSeq2Seq.from_pretrained(

@@ -1,21 +1,34 @@
+"""Run batched XLS-R or Wav2Vec2 CTC ASR over local audio files."""
+
 from __future__ import annotations
 
 import argparse
 import logging
 
 import torch
-from asr_common import (
-    add_shared_args,
-    create_dataloader,
-    finalize_and_write,
-    load_items_from_args,
-    torch_dtype_from_name,
-)
+
+try:
+    from .asr_common import (
+        add_shared_args,
+        create_dataloader,
+        finalize_and_write,
+        load_items_from_args,
+        resolve_device_and_dtype,
+    )
+except ImportError:
+    from asr_common import (
+        add_shared_args,
+        create_dataloader,
+        finalize_and_write,
+        load_items_from_args,
+        resolve_device_and_dtype,
+    )
 from tqdm import tqdm
 from transformers import AutoProcessor, Wav2Vec2ForCTC
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse XLS-R ASR command-line arguments."""
     parser = argparse.ArgumentParser(
         description="Batched XLS-R / Wav2Vec2-CTC ASR inference over many short audio files."
     )
@@ -30,10 +43,10 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Run XLS-R ASR inference."""
     args = parse_args()
     items = load_items_from_args(args)
-    dtype = torch_dtype_from_name(args.dtype)
-    device = torch.device(args.device)
+    device, dtype = resolve_device_and_dtype(args.device, args.dtype)
 
     processor_id = args.processor_id or args.model_id
     logging.info("Loading XLS-R processor: %s", processor_id)
