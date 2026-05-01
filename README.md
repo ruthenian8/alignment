@@ -47,7 +47,7 @@ Human-facing intermediate files are UTF-8 TSV.
 `transcript.tsv` columns:
 
 - `id`: 1-based transcript block number.
-- `transcript`: original manual transcript text, including stress marks and bracketed prompts.
+- `transcript`: manual transcript text, including stress marks and bracketed prompts. When a block has a valid final-line speaker footer, `parse-transcript` prefixes it as a `[TAG:]` marker so `align-srt --use-transcript-speakers` can replace WhisperX speaker codes; the marker is removed from final aligned text.
 - `max_speakers`: interviewer plus interviewee count inferred from block headers.
 - `min_speakers`: interviewee count inferred from block footer.
 

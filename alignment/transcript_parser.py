@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .align import format_transcript_speaker_marker, speaker_tag_from_line
 from .io import TRANSCRIPT_COLUMNS, write_tsv
 
 
@@ -17,10 +18,14 @@ def parse_transcript_text(text: str) -> list[dict[str, object]]:
             continue
         interviewer_count = len([item for item in lines[2].split(",") if item.strip()])
         interviewee_count = len([item for item in lines[-1].split(",") if item.strip()])
+        transcript = " ".join(lines[3:-1])
+        speaker_tag = speaker_tag_from_line(lines[-1])
+        if speaker_tag:
+            transcript = f"{format_transcript_speaker_marker(speaker_tag)} {transcript}"
         rows.append(
             {
                 "id": number,
-                "transcript": " ".join(lines[3:-1]),
+                "transcript": transcript,
                 "max_speakers": interviewer_count + interviewee_count,
                 "min_speakers": interviewee_count,
             }

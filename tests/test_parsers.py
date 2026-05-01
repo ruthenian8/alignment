@@ -56,6 +56,6 @@ XXIIа-19
 ААК
 """.strip()
     rows = parse_transcript_text(text)
-    assert rows[0]["transcript"] == "[Вопрос?] Так, часо\\вня."
+    assert rows[0]["transcript"] == "[ААК:] [Вопрос?] Так, часо\\вня."
     assert rows[0]["max_speakers"] == 3
     assert rows[0]["min_speakers"] == 1

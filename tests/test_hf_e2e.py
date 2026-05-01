@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from alignment.align import transcript_with_block_speaker_markers
 from alignment.cli import main
 from alignment.io import read_tsv
 from alignment.srt import parse_srt
@@ -50,11 +51,15 @@ def test_hf_repo_pez_001_pipeline_smoke(tmp_path: Path) -> None:
             str(aligned_tsv),
             "--index-name",
             "pez_001No0",
+            "--use-transcript-speakers",
+            "--infer-missing-speakers",
         ]
     )
 
     aligned_segments = parse_srt(aligned_srt.read_text(encoding="utf-8"))
     assert len(aligned_segments) == 8
+    assert aligned_segments[0].speaker == "[UNK]:"
+    assert all(segment.speaker == "[ААК]:" for segment in aligned_segments[1:])
     assert "Часовня" in aligned_segments[0].text
     assert "часо\\вня" in aligned_segments[1].text
 
@@ -74,3 +79,40 @@ def test_hf_repo_pez_001_pipeline_smoke(tmp_path: Path) -> None:
     assert Path(manifest_rows[0]["audio_path"]).exists()
     assert Path(manifest_rows[0]["text_path"]).read_text(encoding="utf-8") == aligned_segments[0].text
     assert "Вот эта часовня ваша" in Path(manifest_rows[0]["text_original_path"]).read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(not HF_ROOT.exists(), reason="hf-repo link is not available")
+def test_hf_repo_pez_011_speaker_replacement_smoke(tmp_path: Path) -> None:
+    """Verify real pez_011 speaker tags, collector questions, and ??? tags."""
+    blocks = [
+        block
+        for block in (HF_ROOT / "transcripts" / "pez_011.txt")
+        .read_text(encoding="utf-8-sig")
+        .strip()
+        .split("\n\n")
+        if block.strip()
+    ]
+    assert "[???:]" in blocks[0]
+    assert "[М:]" in blocks[1]
+    assert "[ЛД:]" in blocks[1]
+    assert "[UNK:]" not in transcript_with_block_speaker_markers(blocks[0])
+    assert "[МВ, ???:]" in transcript_with_block_speaker_markers(blocks[0])
+    assert "[ДГ, ДС, ЛД, МВ, М, ???:]" in transcript_with_block_speaker_markers(blocks[1])
+
+    transcript = tmp_path / "pez_011No0.txt"
+    aligned_srt = tmp_path / "pez_011No0.srt"
+    transcript.write_text(blocks[0], encoding="utf-8")
+    main(
+        [
+            "align-srt",
+            str(HF_ROOT / "wx_transcripts" / "pez_011" / "pez_011No0.srt"),
+            str(transcript),
+            str(aligned_srt),
+            "--use-transcript-speakers",
+            "--infer-missing-speakers",
+        ]
+    )
+
+    speakers = {segment.speaker for segment in parse_srt(aligned_srt.read_text(encoding="utf-8"))}
+    assert "[UNK]:" in speakers
+    assert "[МВ, ???]:" in speakers

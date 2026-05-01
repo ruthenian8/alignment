@@ -10,8 +10,10 @@ from .io import ALIGNED_COLUMNS, write_tsv
 from .reorder import normalize_for_match
 from .srt import SrtSegment, format_srt, parse_srt
 
+BRACKET_RE = re.compile(r"\[([^\]]{1,300})\]")
 SPEAKER_MARKER_RE = re.compile(r"\[([^\]]{1,300}):\]")
-SPEAKER_CODE_RE = re.compile(r"[A-ZА-ЯЁ]{2,6}")
+SPEAKER_CODE_RE = re.compile(r"[A-ZА-ЯЁ]{1,6}|\?{3}")
+UNKNOWN_SPEAKER = "UNK"
 
 
 @dataclass(frozen=True)
@@ -67,17 +69,44 @@ def token_similarity(left: list[str], right: list[str]) -> float:
     return 0.0 if common == 0 else (2 * common) / (len(left_set) + len(right_set))
 
 
+def is_unknown_speaker_bracket(marker_text: str) -> bool:
+    """Return true for bracketed interviewer/collector text that should be [UNK]."""
+    text = marker_text.strip()
+    if speaker_tag_from_speaker_text(text.rstrip(":")):
+        return False
+    return text.startswith(("Соб.", "Соб.:")) or "?" in text.replace("???", "")
+
+
+def speaker_tag_from_speaker_text(text: str) -> str:
+    """Extract initials from a text that is expected to contain only speaker tags."""
+    parts = [part.strip() for part in re.split(r"\s*,\s*", text.strip())]
+    if not parts:
+        return ""
+    tags = []
+    for part in parts:
+        if not SPEAKER_CODE_RE.fullmatch(part):
+            return ""
+        tags.append(part)
+    return ", ".join(tags)
+
+
 def speaker_tag_from_marker(marker_text: str) -> str:
     """Extract speaker initials from a bracket marker body."""
-    codes = SPEAKER_CODE_RE.findall(marker_text)
-    return ", ".join(codes)
+    text = marker_text.strip()
+    tag = speaker_tag_from_speaker_text(text.rstrip(":"))
+    if tag:
+        return tag
+    if is_unknown_speaker_bracket(marker_text):
+        return UNKNOWN_SPEAKER
+    if "???" in text:
+        return "???"
+    match = re.match(r"([A-ZА-ЯЁ]{1,6})(?=\s|,|$)", text)
+    return match.group(1) if match else ""
 
 
 def speaker_tag_from_line(line: str) -> str:
     """Extract speaker initials from a standalone transcript speaker line."""
-    parts = [speaker_tag_from_marker(part) for part in re.split(r"\s*,\s*", line.strip())]
-    tags = [part for part in parts if part]
-    return ", ".join(tags) if tags and len(tags) == len(parts) else ""
+    return speaker_tag_from_speaker_text(line)
 
 
 def format_speaker_tag(tag: str) -> str:
@@ -111,6 +140,25 @@ def find_speaker_tag_before_span(transcript: str, start: int) -> str:
             if tag:
                 candidates.append(tag)
     return candidates[-1] if candidates else ""
+
+
+def unknown_speaker_tag_at_span(transcript: str, start: int, end: int) -> str:
+    """Return [UNK] when an aligned span is contained by an unknown-speaker bracket."""
+    if start < 0 or end < start:
+        return ""
+    marker = SPEAKER_MARKER_RE.match(transcript[start:end])
+    if marker and speaker_tag_from_marker(marker.group(1)):
+        start += marker.end()
+        while start < end and transcript[start].isspace():
+            start += 1
+    search_start = max(0, start - 300)
+    search_end = min(len(transcript), start + 300)
+    for match in BRACKET_RE.finditer(transcript[search_start:search_end]):
+        absolute_start = search_start + match.start()
+        absolute_end = search_start + match.end()
+        if absolute_start <= start and end <= absolute_end and is_unknown_speaker_bracket(match.group(1)):
+            return UNKNOWN_SPEAKER
+    return ""
 
 
 def remove_speaker_markers(text: str) -> str:
@@ -256,12 +304,17 @@ def apply_transcript_speakers(
     last_tag = ""
     for item in aligned:
         tag = ""
+        is_unknown_span = False
         if item.matched and item.transcript_end >= 0:
-            tag = find_speaker_tag_before_span(transcript, item.transcript_start)
+            tag = unknown_speaker_tag_at_span(transcript, item.transcript_start, item.transcript_end)
+            is_unknown_span = tag == UNKNOWN_SPEAKER
+            if not tag:
+                tag = find_speaker_tag_before_span(transcript, item.transcript_start)
             if not tag:
                 tag = speaker_tag_from_blocks(speaker_blocks, item.transcript_start)
         if tag:
-            last_tag = tag
+            if not is_unknown_span:
+                last_tag = tag
         elif infer_missing:
             tag = last_tag
         if tag:

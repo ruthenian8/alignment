@@ -56,6 +56,77 @@ def test_transcript_speaker_tags_can_replace_srt_speakers():
     assert "[ААК]: до\\брый день" in aligned_to_srt(updated)
 
 
+def test_unknown_bracket_questions_and_nonstandard_speakers_replace_srt_speakers():
+    srt = parse_srt(
+        """
+1
+00:00:00,000 --> 00:00:01,000
+[SPEAKER_00]: как играть?
+
+2
+00:00:01,000 --> 00:00:02,000
+[SPEAKER_01]: в ладушки
+
+3
+00:00:02,000 --> 00:00:03,000
+[SPEAKER_02]: надо положить конфетки
+
+4
+00:00:03,000 --> 00:00:04,000
+[SPEAKER_03]: непонятно как
+""".strip()
+    )
+    transcript = (
+        "[Как игра\\ть?] [М:] В ла\\душки. [ЛД:] На\\до положи\\ть конфе\\тки. "
+        "[Мальчик рядом ???:] Непоня\\тно как."
+    )
+    aligned = align_segments(srt, transcript, max_span=5, similarity_threshold=0.2)
+    updated = apply_transcript_speakers(aligned, transcript)
+    assert [item.srt.speaker for item in updated] == ["[UNK]:", "[М]:", "[ЛД]:", "[???]:"]
+
+
+def test_collector_bracket_replaces_srt_speaker_with_unknown():
+    srt = parse_srt("1\n00:00:00,000 --> 00:00:01,000\n[SPEAKER_00]: ребята расскажите\n")
+    transcript = "[Соб.: Ребя\\та, расскажи\\те?]"
+    aligned = align_segments(srt, transcript, max_span=5, similarity_threshold=0.2)
+    updated = apply_transcript_speakers(aligned, transcript)
+    assert updated[0].srt.speaker == "[UNK]:"
+
+
+def test_unknown_speaker_does_not_carry_forward_when_inferring_missing_speakers():
+    srt = parse_srt(
+        """
+1
+00:00:00,000 --> 00:00:01,000
+[SPEAKER_00]: часовня какому празднику посвящена
+
+2
+00:00:01,000 --> 00:00:02,000
+[SPEAKER_01]: часовня казанская
+""".strip()
+    )
+    transcript = "[Часо\\вня како\\му пра\\зднику посвящена?] Часо\\вня Каза\\нская."
+    aligned = align_segments(srt, transcript, max_span=8, similarity_threshold=0.2)
+    updated = apply_transcript_speakers(aligned, transcript, infer_missing=True)
+    assert [item.srt.speaker for item in updated] == ["[UNK]:", "[SPEAKER_01]:"]
+
+
+def test_mixed_collector_question_and_answer_keeps_srt_speaker():
+    srt = parse_srt("1\n00:00:00,000 --> 00:00:01,000\n[SPEAKER_01]: она была уже да\n")
+    transcript = "[Она была уже?] Да,"
+    aligned = align_segments(srt, transcript, max_span=6, similarity_threshold=0.2)
+    updated = apply_transcript_speakers(aligned, transcript, infer_missing=True)
+    assert updated[0].srt.speaker == "[SPEAKER_01]:"
+
+
+def test_collector_question_after_artificial_block_marker_gets_unknown():
+    srt = parse_srt("1\n00:00:00,000 --> 00:00:01,000\n[SPEAKER_01]: во что играете\n")
+    transcript = "[МВ, ???:] [Соб.: Во что игра\\ете?]"
+    aligned = align_segments(srt, transcript, max_span=8, similarity_threshold=0.2)
+    updated = apply_transcript_speakers(aligned, transcript, infer_missing=True)
+    assert updated[0].srt.speaker == "[UNK]:"
+
+
 def test_transcript_block_footer_speaker_replaces_srt_speakers(tmp_path: Path):
     srt_path = tmp_path / "chunk.srt"
     transcript_path = tmp_path / "chunk.txt"
