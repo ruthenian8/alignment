@@ -37,6 +37,15 @@ class AlignedSegment:
     transcript_end: int = -1
 
 
+@dataclass(frozen=True)
+class SpeakerBlock:
+    """Transcript text range covered by a block-level speaker footer."""
+
+    start: int
+    end: int
+    tag: str
+
+
 def tokenize_transcript(text: str) -> list[TranscriptToken]:
     """Tokenize transcript text while preserving original character offsets."""
     tokens: list[TranscriptToken] = []
@@ -64,9 +73,21 @@ def speaker_tag_from_marker(marker_text: str) -> str:
     return ", ".join(codes)
 
 
+def speaker_tag_from_line(line: str) -> str:
+    """Extract speaker initials from a standalone transcript speaker line."""
+    parts = [speaker_tag_from_marker(part) for part in re.split(r"\s*,\s*", line.strip())]
+    tags = [part for part in parts if part]
+    return ", ".join(tags) if tags and len(tags) == len(parts) else ""
+
+
 def format_speaker_tag(tag: str) -> str:
     """Format transcript speaker initials as an SRT speaker prefix."""
     return f"[{tag}]:"
+
+
+def format_transcript_speaker_marker(tag: str) -> str:
+    """Format speaker initials as a transcript marker."""
+    return f"[{tag}:]"
 
 
 def find_speaker_tag(text: str) -> str:
@@ -99,6 +120,55 @@ def remove_speaker_markers(text: str) -> str:
         return "" if speaker_tag_from_marker(match.group(1)) else match.group(0)
 
     return re.sub(r"\s+", " ", SPEAKER_MARKER_RE.sub(replace_marker, text)).strip()
+
+
+def speaker_blocks_from_transcript(transcript: str) -> list[SpeakerBlock]:
+    """Find normal transcript blocks whose final line contains speaker initials."""
+    blocks: list[SpeakerBlock] = []
+    for match in re.finditer(r"\S.*?(?=\n\s*\n|\Z)", transcript, flags=re.DOTALL):
+        block = match.group(0)
+        lines = list(re.finditer(r"[^\n]+", block))
+        if len(lines) < 2:
+            continue
+        footer = lines[-1]
+        tag = speaker_tag_from_line(footer.group(0))
+        if not tag:
+            continue
+        content_start_line = lines[3] if len(lines) >= 5 else lines[0]
+        content_start = match.start() + content_start_line.start()
+        content_end = match.start() + footer.start()
+        if content_end > content_start:
+            blocks.append(SpeakerBlock(content_start, content_end, tag))
+    return blocks
+
+
+def transcript_with_block_speaker_markers(transcript: str) -> str:
+    """Convert block-final speaker initials into leading bracket markers for alignment."""
+    parts: list[str] = []
+    for match in re.finditer(r"\S.*?(?=\n\s*\n|\Z)", transcript, flags=re.DOTALL):
+        block = match.group(0)
+        lines = list(re.finditer(r"[^\n]+", block))
+        if len(lines) < 2:
+            parts.append(block.strip())
+            continue
+        footer = lines[-1]
+        tag = speaker_tag_from_line(footer.group(0))
+        if not tag:
+            parts.append(block.strip())
+            continue
+        content_start = lines[3].start() if len(lines) >= 5 else lines[0].start()
+        content = block[content_start : footer.start()].strip()
+        if content:
+            parts.append(f"{format_transcript_speaker_marker(tag)} {content}")
+    return "\n\n".join(parts)
+
+
+def speaker_tag_from_blocks(blocks: list[SpeakerBlock], start: int) -> str:
+    """Return the block-level speaker tag for a transcript offset."""
+    for block in blocks:
+        if block.start <= start < block.end:
+            return block.tag
+    return ""
 
 
 def align_segments(
@@ -182,11 +252,14 @@ def apply_transcript_speakers(
     carried forward until another explicit bracket tag appears.
     """
     output: list[AlignedSegment] = []
+    speaker_blocks = speaker_blocks_from_transcript(transcript)
     last_tag = ""
     for item in aligned:
         tag = ""
         if item.matched and item.transcript_end >= 0:
             tag = find_speaker_tag_before_span(transcript, item.transcript_start)
+            if not tag:
+                tag = speaker_tag_from_blocks(speaker_blocks, item.transcript_start)
         if tag:
             last_tag = tag
         elif infer_missing:
@@ -244,9 +317,14 @@ def align_srt_file(
     infer_missing_speakers: bool = False,
 ) -> list[AlignedSegment]:
     """Align one SRT file to transcript text and optionally write merged SRT."""
-    aligned = align_segments(parse_srt(Path(srt_path).read_text(encoding="utf-8-sig")), transcript_text)
+    alignment_transcript = (
+        transcript_with_block_speaker_markers(transcript_text) if use_transcript_speakers else transcript_text
+    )
+    aligned = align_segments(parse_srt(Path(srt_path).read_text(encoding="utf-8-sig")), alignment_transcript)
     if use_transcript_speakers:
-        aligned = apply_transcript_speakers(aligned, transcript_text, infer_missing=infer_missing_speakers)
+        aligned = apply_transcript_speakers(
+            aligned, alignment_transcript, infer_missing=infer_missing_speakers
+        )
     if output_srt is not None:
         Path(output_srt).parent.mkdir(parents=True, exist_ok=True)
         Path(output_srt).write_text(aligned_to_srt(aligned), encoding="utf-8")

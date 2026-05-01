@@ -1,7 +1,7 @@
 from pathlib import Path
 from unittest.mock import patch
 
-from alignment.align import align_segments, aligned_to_srt, apply_transcript_speakers
+from alignment.align import align_segments, align_srt_file, aligned_to_srt, apply_transcript_speakers
 from alignment.audio import build_cut_command
 from alignment.export import export_segments
 from alignment.srt import parse_srt
@@ -54,6 +54,44 @@ def test_transcript_speaker_tags_can_replace_srt_speakers():
     updated = apply_transcript_speakers(aligned, transcript, infer_missing=True)
     assert [item.srt.speaker for item in updated] == ["[ААК]:", "[ААК]:", "[РВВ]:"]
     assert "[ААК]: до\\брый день" in aligned_to_srt(updated)
+
+
+def test_transcript_block_footer_speaker_replaces_srt_speakers(tmp_path: Path):
+    srt_path = tmp_path / "chunk.srt"
+    transcript_path = tmp_path / "chunk.txt"
+    output_path = tmp_path / "aligned.srt"
+    srt_path.write_text(
+        """
+1
+00:00:00,000 --> 00:00:01,000
+[SPEAKER_00]: добрый день
+
+2
+00:00:01,000 --> 00:00:02,000
+[SPEAKER_01]: красный дом
+""".strip(),
+        encoding="utf-8",
+    )
+    transcript_path.write_text(
+        "\n".join(
+            [
+                "XXIIа-19",
+                "Пежма-Берег",
+                "АБМ, РВВ",
+                "до\\брый день кра\\сный дом",
+                "ААК",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    aligned = align_srt_file(
+        srt_path,
+        transcript_path.read_text(encoding="utf-8"),
+        output_path,
+        use_transcript_speakers=True,
+    )
+    assert [item.srt.speaker for item in aligned] == ["[ААК]:", "[ААК]:"]
+    assert "[ААК]: до\\брый день" in output_path.read_text(encoding="utf-8")
 
 
 def test_export_builds_deterministic_names_and_ffmpeg_commands(tmp_path: Path):
