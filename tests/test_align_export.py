@@ -1,7 +1,13 @@
 from pathlib import Path
 from unittest.mock import patch
 
-from alignment.align import align_segments, align_srt_file, aligned_to_srt, apply_transcript_speakers
+from alignment.align import (
+    align_segments,
+    align_srt_file,
+    aligned_to_srt,
+    apply_transcript_speakers,
+    remove_alignment_notes,
+)
 from alignment.audio import build_cut_command
 from alignment.export import export_segments
 from alignment.srt import parse_srt
@@ -125,6 +131,32 @@ def test_collector_question_after_artificial_block_marker_gets_unknown():
     aligned = align_segments(srt, transcript, max_span=8, similarity_threshold=0.2)
     updated = apply_transcript_speakers(aligned, transcript, infer_missing=True)
     assert updated[0].srt.speaker == "[UNK]:"
+
+
+def test_alignment_skips_editorial_brackets_but_keeps_speaker_tags():
+    srt = parse_srt(
+        """
+1
+00:00:00,000 --> 00:00:01,000
+[SPEAKER_00]: костоправ его звали
+
+2
+00:00:01,000 --> 00:00:02,000
+[SPEAKER_01]: татьяна не знает
+""".strip()
+    )
+    transcript = (
+        "[ХВВ, ФМП:] [ХВВ спрашивает БВИ, помнит ли она знахаря. Отвечает ФМП:] "
+        "Костопра\\в его\\ зва\\ли [историю про Костоправа см. XXa-10]. "
+        "[ГЭС:] Татья\\на не зна\\ет?"
+    )
+    aligned = align_segments(srt, transcript, max_span=8, similarity_threshold=0.2)
+    updated = apply_transcript_speakers(aligned, transcript)
+    assert [item.matched for item in updated] == [True, True]
+    assert [item.srt.speaker for item in updated] == ["[ХВВ, ФМП]:", "[ГЭС]:"]
+    assert "историю про" not in updated[0].normalized_text
+    assert "историю про" not in remove_alignment_notes(transcript)
+    assert "[ГЭС:]" in remove_alignment_notes(transcript)
 
 
 def test_transcript_block_footer_speaker_replaces_srt_speakers(tmp_path: Path):

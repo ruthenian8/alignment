@@ -50,8 +50,15 @@ class SpeakerBlock:
 
 def tokenize_transcript(text: str) -> list[TranscriptToken]:
     """Tokenize transcript text while preserving original character offsets."""
+    skipped_ranges = [
+        (match.start(), match.end())
+        for match in BRACKET_RE.finditer(text)
+        if not should_tokenize_bracket(match.group(1))
+    ]
     tokens: list[TranscriptToken] = []
     for match in re.finditer(r"\S+", text):
+        if any(match.start() < end and start < match.end() for start, end in skipped_ranges):
+            continue
         raw = match.group()
         norm = normalize_for_match(raw.strip("[]"))
         if norm:
@@ -77,6 +84,17 @@ def is_unknown_speaker_bracket(marker_text: str) -> bool:
     return text.startswith(("Соб.", "Соб.:")) or "?" in text.replace("???", "")
 
 
+def should_tokenize_bracket(marker_text: str) -> bool:
+    """Return true for bracketed text whose words should participate in matching."""
+    return is_unknown_speaker_bracket(marker_text)
+
+
+def is_short_speaker_action(text: str) -> bool:
+    """Return true for compact markers like ``[ХВВ подхватывает:]``."""
+    body = text.rstrip(":").strip()
+    return not re.search(r"[.!?…]", body) and len(body.split()) <= 3
+
+
 def speaker_tag_from_speaker_text(text: str) -> str:
     """Extract initials from a text that is expected to contain only speaker tags."""
     parts = [part.strip() for part in re.split(r"\s*,\s*", text.strip())]
@@ -100,7 +118,7 @@ def speaker_tag_from_marker(marker_text: str) -> str:
         return UNKNOWN_SPEAKER
     if "???" in text:
         return "???"
-    match = re.match(r"([A-ZА-ЯЁ]{1,6})(?=\s|,|$)", text)
+    match = re.match(r"([A-ZА-ЯЁ]{1,6})(?=\s|,|$)", text) if is_short_speaker_action(text) else None
     return match.group(1) if match else ""
 
 
@@ -168,6 +186,17 @@ def remove_speaker_markers(text: str) -> str:
         return "" if speaker_tag_from_marker(match.group(1)) else match.group(0)
 
     return re.sub(r"\s+", " ", SPEAKER_MARKER_RE.sub(replace_marker, text)).strip()
+
+
+def remove_alignment_notes(text: str) -> str:
+    """Remove bracketed editorial notes that should not drive alignment."""
+
+    def replace_note(match: re.Match[str]) -> str:
+        marker = match.group(1)
+        return match.group(0) if speaker_tag_from_marker(marker) or is_unknown_speaker_bracket(marker) else ""
+
+    text = re.sub(r"\s+", " ", BRACKET_RE.sub(replace_note, text)).strip()
+    return re.sub(r"\s+([,.;:!?])", r"\1", text)
 
 
 def speaker_blocks_from_transcript(transcript: str) -> list[SpeakerBlock]:
@@ -373,6 +402,7 @@ def align_srt_file(
     alignment_transcript = (
         transcript_with_block_speaker_markers(transcript_text) if use_transcript_speakers else transcript_text
     )
+    alignment_transcript = remove_alignment_notes(alignment_transcript)
     aligned = align_segments(parse_srt(Path(srt_path).read_text(encoding="utf-8-sig")), alignment_transcript)
     if use_transcript_speakers:
         aligned = apply_transcript_speakers(
