@@ -159,6 +159,28 @@ def test_alignment_skips_editorial_brackets_but_keeps_speaker_tags():
     assert "[ГЭС:]" in remove_alignment_notes(transcript)
 
 
+def test_alignment_skips_long_opening_editorial_brackets():
+    srt = parse_srt(
+        """
+1
+00:00:00,000 --> 00:00:01,000
+[SPEAKER_00]: у меня было
+
+2
+00:00:01,000 --> 00:00:02,000
+[SPEAKER_00]: в шортах крапива
+""".strip()
+    )
+    long_note = " ".join(["дети стоят в кружке"] * 30)
+    transcript = f"[ДС, А:] [{long_note}. ДС говорит:] У меня\\ бы\\ло, в шо\\ртах крапи\\ва."
+    cleaned = remove_alignment_notes(transcript)
+    aligned = align_segments(srt, cleaned, max_span=8, similarity_threshold=0.2)
+    updated = apply_transcript_speakers(aligned, cleaned, infer_missing=True)
+    assert long_note not in cleaned
+    assert [item.matched for item in updated] == [True, True]
+    assert [item.srt.speaker for item in updated] == ["[ДС]:", "[ДС]:"]
+
+
 def test_transcript_block_footer_speaker_replaces_srt_speakers(tmp_path: Path):
     srt_path = tmp_path / "chunk.srt"
     transcript_path = tmp_path / "chunk.txt"

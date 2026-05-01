@@ -10,7 +10,7 @@ from .io import ALIGNED_COLUMNS, write_tsv
 from .reorder import normalize_for_match
 from .srt import SrtSegment, format_srt, parse_srt
 
-BRACKET_RE = re.compile(r"\[([^\]]{1,300})\]")
+BRACKET_RE = re.compile(r"\[([^\]]+)\]")
 SPEAKER_MARKER_RE = re.compile(r"\[([^\]]{1,300}):\]")
 SPEAKER_CODE_RE = re.compile(r"[A-ZА-ЯЁ]{1,6}|\?{3}")
 UNKNOWN_SPEAKER = "UNK"
@@ -95,6 +95,20 @@ def is_short_speaker_action(text: str) -> bool:
     return not re.search(r"[.!?…]", body) and len(body.split()) <= 3
 
 
+def speaker_tag_from_editorial_note(text: str) -> str:
+    """Extract explicit speaker initials from editorial notes like ``ДС говорит``."""
+    code = SPEAKER_CODE_RE.pattern
+    patterns = [
+        rf"(?<!\w)({code})\s+говорит\b",
+        rf"\bговорит(?:\s+\S+){{0,3}}\s+({code})(?!\w)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1)
+    return ""
+
+
 def speaker_tag_from_speaker_text(text: str) -> str:
     """Extract initials from a text that is expected to contain only speaker tags."""
     parts = [part.strip() for part in re.split(r"\s*,\s*", text.strip())]
@@ -119,7 +133,9 @@ def speaker_tag_from_marker(marker_text: str) -> str:
     if "???" in text:
         return "???"
     match = re.match(r"([A-ZА-ЯЁ]{1,6})(?=\s|,|$)", text) if is_short_speaker_action(text) else None
-    return match.group(1) if match else ""
+    if match:
+        return match.group(1)
+    return speaker_tag_from_editorial_note(text)
 
 
 def speaker_tag_from_line(line: str) -> str:
@@ -193,7 +209,10 @@ def remove_alignment_notes(text: str) -> str:
 
     def replace_note(match: re.Match[str]) -> str:
         marker = match.group(1)
-        return match.group(0) if speaker_tag_from_marker(marker) or is_unknown_speaker_bracket(marker) else ""
+        if is_unknown_speaker_bracket(marker):
+            return match.group(0)
+        tag = speaker_tag_from_marker(marker)
+        return format_transcript_speaker_marker(tag) if tag else ""
 
     text = re.sub(r"\s+", " ", BRACKET_RE.sub(replace_note, text)).strip()
     return re.sub(r"\s+([,.;:!?])", r"\1", text)
