@@ -135,6 +135,26 @@ python run_xlsr_asr.py \
   --pin-memory
 ```
 
+To use open pretrained XLS-R/Wav2Vec2 CTC weights with a local tokenizer, keep `--model-id` pointed at
+the pretrained weights and pass the local vocabulary files separately:
+
+```bash
+python run_xlsr_asr.py \
+  --input-dir /data/audio \
+  --glob '*.wav' \
+  --output /data/xlsr_preds.jsonl \
+  --model-id facebook/wav2vec2-xls-r-1b \
+  --processor-id facebook/wav2vec2-xls-r-1b \
+  --vocab-json /models/local-xlsr-tokenizer/vocab.json \
+  --tokenizer-json /models/local-xlsr-tokenizer/tokenizer.json \
+  --device cuda:0 \
+  --dtype float16
+```
+
+`--tokenizer-json` is optional, but when it is supplied `--vocab-json` is required. The feature
+extractor is still loaded from `--processor-id`; the local tokenizer supplies `vocab_size` and
+`pad_token_id` for the CTC head while the open pretrained weights are loaded from `--model-id`.
+
 ### GigaAM
 
 Use `v3_e2e_rnnt` by default on a 40 GB GPU. It is the largest current GigaAM end-to-end ASR
