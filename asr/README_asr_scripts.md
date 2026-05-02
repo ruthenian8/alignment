@@ -4,10 +4,11 @@ Files:
 - `run_whisper_asr.py`
 - `run_mms_asr.py`
 - `run_xlsr_asr.py`
+- `run_gigaam_asr.py`
 - `asr_common.py`
 - `evaluate_corpus.py`
 
-All three scripts share the same core CLI:
+All model runners share the same core CLI:
 
 ```bash
 python SCRIPT.py \
@@ -30,6 +31,8 @@ Notes:
 - Output can be `.jsonl` or `.csv`.
 - Files are duration-bucketed before batching, which greatly reduces padding waste for 2-10 second clips.
 - GPU efficiency comes mainly from one large batched inference stream on the 40 GB card, while CPU workers decode and resample in parallel.
+- GigaAM uses the same discovery and output format, but calls the upstream short-clip `transcribe()` API
+  rather than the batched Hugging Face processor path.
 
 ## Corpus WER for cut samples
 
@@ -60,6 +63,15 @@ python asr/evaluate_corpus.py \
   hf-repo/cut_samples \
   build/asr-eval-whisper \
   --asr-command "python asr/run_whisper_asr.py --manifest {manifest} --output {predictions} --model-id openai/whisper-large-v3 --language russian --task transcribe --device cuda:0 --dtype float16"
+```
+
+GigaAM works the same way for utterance-level clips:
+
+```bash
+python asr/evaluate_corpus.py \
+  hf-repo/cut_samples \
+  build/asr-eval-gigaam \
+  --asr-command "python asr/run_gigaam_asr.py --manifest {manifest} --output {predictions} --model-id v3_e2e_rnnt --device cuda:0 --dtype float16"
 ```
 
 Outputs:
@@ -123,10 +135,38 @@ python run_xlsr_asr.py \
   --pin-memory
 ```
 
+### GigaAM
+
+Use `v3_e2e_rnnt` by default on a 40 GB GPU. It is the largest current GigaAM end-to-end ASR
+variant and keeps punctuation/text normalization, while still being small enough for fp16 inference on
+that card. GigaAM's regular `transcribe()` API is intended for clips up to 25 seconds, which matches
+the utterance-level `cut_samples/...` layout used by the corpus evaluator.
+
+```bash
+python run_gigaam_asr.py \
+  --input-dir /data/audio \
+  --glob '*.wav' \
+  --output /data/gigaam_preds.jsonl \
+  --model-id v3_e2e_rnnt \
+  --device cuda:0 \
+  --dtype float16
+```
+
+`--model-id` may be omitted for GigaAM; it defaults to `v3_e2e_rnnt`. Add `--download-root` to control
+the GigaAM checkpoint cache, or `--use-flash` only when flash attention is installed and tested in the
+runtime environment.
+
 ## Dependency sketch
 
 ```bash
 pip install torch torchaudio transformers accelerate sentencepiece tqdm
+```
+
+For GigaAM:
+
+```bash
+git clone https://github.com/salute-developers/GigaAM.git
+python -m pip install -e GigaAM[torch]
 ```
 
 Some Whisper checkpoints may also benefit from:

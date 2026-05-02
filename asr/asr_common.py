@@ -308,7 +308,12 @@ def write_results(path: str, rows: Sequence[dict]) -> None:
     raise ValueError("Output file must end in .jsonl or .csv")
 
 
-def add_shared_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
+def add_shared_args(
+    parser: argparse.ArgumentParser,
+    *,
+    model_id_required: bool = True,
+    default_model_id: str | None = None,
+) -> argparse.ArgumentParser:
     """Add common ASR command-line arguments to a parser."""
     parser.add_argument(
         "--input-dir", type=str, default=None, help="Directory scanned recursively for audio files."
@@ -321,7 +326,13 @@ def add_shared_args(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     )
     parser.add_argument("--glob", type=str, default="*", help="Recursive glob applied under --input-dir.")
     parser.add_argument("--output", type=str, required=True, help="Output .jsonl or .csv file.")
-    parser.add_argument("--model-id", type=str, required=True, help="HF model id or local path.")
+    parser.add_argument(
+        "--model-id",
+        type=str,
+        required=model_id_required,
+        default=default_model_id,
+        help="Model id, local path, or backend-specific model name.",
+    )
     parser.add_argument(
         "--language", type=str, default=None, help="Language or dialect tag if supported by the model."
     )
