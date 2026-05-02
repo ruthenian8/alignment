@@ -10,8 +10,10 @@ from .embeddings import align_pairs_with_embeddings, extract_dialect_text, write
 from .export import export_srt_files
 from .index_parser import write_index_tsv
 from .join import join_tsv
+from .mapping import align_mapping_table
 from .reorder import reorder_tsv
 from .transcript_parser import write_transcript_tsv
+from .wer import compute_wer_from_tsv, format_wer_report
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -55,6 +57,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="Carry the last bracketed transcript speaker tag forward across following aligned segments.",
     )
 
+    align_map = subparsers.add_parser(
+        "align-map",
+        help="Align every transcript row in a chunk mapping CSV/TSV to matching SRT files.",
+    )
+    align_map.add_argument("mapping", type=Path, help="CSV/TSV table with name and transcript columns.")
+    align_map.add_argument("srt_dir", type=Path, help="Directory containing SRT files named after chunks.")
+    align_map.add_argument(
+        "output_dir", type=Path, help="Directory for manual, aligned, and summary outputs."
+    )
+    align_map.add_argument(
+        "--use-transcript-speakers",
+        action="store_true",
+        help="Replace SRT speaker codes with bracketed speaker tags from the manual transcript.",
+    )
+    align_map.add_argument(
+        "--infer-missing-speakers",
+        action="store_true",
+        help="Carry the last bracketed transcript speaker tag forward across following aligned segments.",
+    )
+
     export = subparsers.add_parser("export-corpus", help="Cut audio clips and write text plus manifest.")
     export.add_argument("audio", type=Path, help="Input audio chunk.")
     export.add_argument("original_srt", type=Path, help="SRT preserving original/manual text.")
@@ -86,6 +108,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=0.65,
         help="Similarity threshold for removing bracketed interviewer prompts from SRT.",
     )
+
+    wer = subparsers.add_parser(
+        "wer",
+        help="Compute global WER from an aligned TSV, skipping unmatched or zero-score rows.",
+    )
+    wer.add_argument("aligned_tsv", type=Path, help="Post-alignment TSV path.")
+    wer.add_argument("--top", type=int, default=20, help="Number of common mismatches to print.")
     return parser
 
 
@@ -111,6 +140,14 @@ def main(argv: list[str] | None = None) -> None:
         )
         if args.output_tsv:
             write_aligned_tsv(args.index_name or args.srt.stem, aligned, args.output_tsv)
+    elif args.command == "align-map":
+        align_mapping_table(
+            args.mapping,
+            args.srt_dir,
+            args.output_dir,
+            use_transcript_speakers=args.use_transcript_speakers,
+            infer_missing_speakers=args.infer_missing_speakers,
+        )
     elif args.command == "export-corpus":
         export_srt_files(args.audio, args.original_srt, args.clean_srt, args.output_dir, args.manifest)
     elif args.command == "align-embeddings":
@@ -127,6 +164,9 @@ def main(argv: list[str] | None = None) -> None:
             join_short=not args.no_join_short,
         )
         write_embedded_alignment_tsv(pairs, args.output)
+    elif args.command == "wer":
+        stats, mismatches = compute_wer_from_tsv(args.aligned_tsv)
+        print(format_wer_report(stats, mismatches, top=args.top))
 
 
 if __name__ == "__main__":

@@ -13,6 +13,12 @@ from .srt import normalize_timestamp
 TIME_RE = re.compile(r"\d{1,2}:\d{2}:\d{2}[,.]\d{3}")
 START_RE = re.compile(rf"^\s*({TIME_RE.pattern})(?:\s*[-–]\s*|\s+)?(.*)")
 CONT_RE = re.compile(r"продолж|окончание|начало\s+см", re.IGNORECASE)
+INDEX_PREFIX_RE = re.compile(r"^\s*\d{1,2}:\d{2}:\d{2}[,.]\d{3}\s*[-–—]\s*")
+
+
+def is_continuation_fragment(text: str) -> bool:
+    """Return True for index descriptions that point back to an earlier start."""
+    return "начало см" in INDEX_PREFIX_RE.sub("", text).casefold()
 
 
 def read_index_text(path: Path | str) -> str:

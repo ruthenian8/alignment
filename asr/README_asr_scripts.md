@@ -5,6 +5,7 @@ Files:
 - `run_mms_asr.py`
 - `run_xlsr_asr.py`
 - `asr_common.py`
+- `evaluate_corpus.py`
 
 All three scripts share the same core CLI:
 
@@ -29,6 +30,44 @@ Notes:
 - Output can be `.jsonl` or `.csv`.
 - Files are duration-bucketed before batching, which greatly reduces padding waste for 2-10 second clips.
 - GPU efficiency comes mainly from one large batched inference stream on the 40 GB card, while CPU workers decode and resample in parallel.
+
+## Corpus WER for cut samples
+
+`evaluate_corpus.py` expects utterance-level files laid out like `cut_samples/pez_001/pez_001No1/`:
+
+```text
+001_SPEAKER_00_00-00-00-031.wav
+001_SPEAKER_00_00-00-00-031.txt
+001_SPEAKER_00_00-00-00-031_orig.txt
+```
+
+The sibling `.txt` file is the normalized reference. `_orig.txt` is preserved by the corpus builder but is
+not used for ASR WER.
+
+Evaluate an existing prediction file:
+
+```bash
+python asr/evaluate_corpus.py \
+  hf-repo/cut_samples \
+  build/asr-eval \
+  --predictions build/asr-eval/predictions.jsonl
+```
+
+Run inference first, then evaluate:
+
+```bash
+python asr/evaluate_corpus.py \
+  hf-repo/cut_samples \
+  build/asr-eval-whisper \
+  --asr-command "python asr/run_whisper_asr.py --manifest {manifest} --output {predictions} --model-id openai/whisper-large-v3 --language russian --task transcribe --device cuda:0 --dtype float16"
+```
+
+Outputs:
+- `audio_manifest.txt`: audio paths passed to the ASR runner.
+- `predictions.jsonl`: default inference output path when `--asr-command` is used.
+- `per_utterance.csv`: per-file reference, prediction, edit counts, and WER.
+- `mismatches.csv`: all substitutions, deletions, and insertions sorted by frequency.
+- `wer_report.txt`: global WER plus the most common error types.
 
 ## Recommended settings for a 40 GB GPU
 

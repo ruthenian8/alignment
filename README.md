@@ -26,6 +26,7 @@ alignment join build/pez_001/index.tsv build/pez_001/transcript.tsv build/pez_00
 alignment reorder build/pez_001/joined.tsv build/pez_001/reordered.tsv
 alignment align-srt data/whisper_srt/pez_001/pez_001No0.srt transcript.txt outputs/pez_001No0.srt --output-tsv outputs/pez_001No0.tsv
 alignment align-embeddings data/whisper_srt/pez_001/pez_001No0.srt transcript.txt outputs/pez_001No0_embs.tsv
+alignment wer outputs/pez_001No0.tsv --top 20
 alignment export-corpus chunk.wav outputs/pez_001No0.srt outputs/pez_001No0.srt outputs/clips outputs/manifest.tsv
 ```
 
@@ -71,6 +72,8 @@ Human-facing intermediate files are UTF-8 TSV.
 - `text_original`: original aligned text.
 
 `align-embeddings` is an optional side path for the old embedding experiment. It removes bracketed interviewer prompts, segments dialect text around pauses, and aligns segment pairs with a lazily loaded `sentence-transformers` model. It is not the default aligner, and normal parser/alignment tests do not require external models.
+
+`wer` computes global word error rate from an `aligned.tsv`, using only rows with `matched=True` and `score > 0`. It normalizes both SRT and manual text with the same text-normalization path used by alignment, drops square-bracketed notes and tags, and prints the most common substitutions, deletions, and insertions.
 
 ## Development
 
