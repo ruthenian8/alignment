@@ -12,9 +12,30 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-import torch
-import torchaudio
-from torch.utils.data import DataLoader, Dataset, Sampler
+try:
+    import torch
+except ImportError:  # pragma: no cover - depends on optional ASR environment.
+    torch = None
+
+try:
+    import torchaudio
+except ImportError:  # pragma: no cover - depends on optional ASR environment.
+    torchaudio = None
+
+if torch is not None:
+    from torch.utils.data import DataLoader, Dataset, Sampler
+else:
+    DataLoader = None
+
+    class Dataset:
+        """Placeholder base class used when torch is not installed."""
+
+    class Sampler:
+        """Placeholder base class used when torch is not installed."""
+
+        def __class_getitem__(cls, _item):
+            return cls
+
 
 AUDIO_EXTENSIONS = {".wav", ".flac", ".mp3", ".m4a", ".ogg", ".opus", ".webm"}
 TARGET_SR = 16_000
@@ -41,23 +62,24 @@ class AudioDataset(Dataset):
     """Load, mono-mix, and resample audio files lazily for inference."""
 
     def __init__(self, items: Sequence[AudioItem], target_sr: int = TARGET_SR):
+        self._torchaudio = require_torchaudio()
         self.items = list(items)
         self.target_sr = target_sr
-        self._resamplers: dict[int, torchaudio.transforms.Resample] = {}
+        self._resamplers: dict[int, object] = {}
 
     def __len__(self) -> int:
         return len(self.items)
 
-    def _get_resampler(self, orig_sr: int) -> torchaudio.transforms.Resample | None:
+    def _get_resampler(self, orig_sr: int) -> object | None:
         if orig_sr == self.target_sr:
             return None
         if orig_sr not in self._resamplers:
-            self._resamplers[orig_sr] = torchaudio.transforms.Resample(orig_sr, self.target_sr)
+            self._resamplers[orig_sr] = self._torchaudio.transforms.Resample(orig_sr, self.target_sr)
         return self._resamplers[orig_sr]
 
     def __getitem__(self, idx: int) -> dict:
         item = self.items[idx]
-        wav, sr = torchaudio.load(str(item.path))
+        wav, sr = self._torchaudio.load(str(item.path))
         if wav.numel() == 0:
             raise RuntimeError(f"Empty audio file: {item.path}")
         if wav.shape[0] > 1:
@@ -125,10 +147,11 @@ class DurationBucketBatchSampler(Sampler[list[int]]):
 
 def collate_audio(batch: Sequence[dict]) -> dict:
     """Pad variable-length audio tensors and return batch metadata."""
+    torch_lib = require_torch()
     audios = [x["audio"] for x in batch]
-    lengths = torch.tensor([x["num_samples"] for x in batch], dtype=torch.long)
-    padded = torch.nn.utils.rnn.pad_sequence(audios, batch_first=True)
-    attention_mask = torch.arange(padded.shape[1])[None, :] < lengths[:, None]
+    lengths = torch_lib.tensor([x["num_samples"] for x in batch], dtype=torch_lib.long)
+    padded = torch_lib.nn.utils.rnn.pad_sequence(audios, batch_first=True)
+    attention_mask = torch_lib.arange(padded.shape[1])[None, :] < lengths[:, None]
     return {
         "paths": [x["path"] for x in batch],
         "audio": padded,
@@ -177,18 +200,50 @@ def _resolve_manifest_path(manifest_path: Path, value: str) -> Path:
     return path if path.is_absolute() else manifest_path.parent / path
 
 
+def require_torch():
+    """Return torch or raise a clear runtime error for optional ASR commands."""
+    if torch is None:
+        raise RuntimeError("ASR inference requires torch. Install the versions pinned in freeze.txt.")
+    return torch
+
+
+def require_torchaudio():
+    """Return torchaudio or raise a clear runtime error for optional ASR commands."""
+    if torchaudio is None:
+        raise RuntimeError("ASR inference requires torchaudio. Install the versions pinned in freeze.txt.")
+    return torchaudio
+
+
+def audio_duration_s(path: Path) -> float:
+    """Return audio duration using metadata when available, falling back to decoding.
+
+    Some torchaudio builds expose ``torchaudio.info``, while others only expose
+    ``torchaudio.load``. The fallback keeps duration discovery compatible with
+    the frozen ASR environment without changing the supported input formats.
+    """
+    ta = require_torchaudio()
+    info = getattr(ta, "info", None)
+    if callable(info):
+        try:
+            metadata = info(str(path))
+            if metadata.num_frames > 0 and metadata.sample_rate > 0:
+                return metadata.num_frames / float(metadata.sample_rate)
+        except Exception as e:
+            logging.debug("Falling back to audio decode for %s after metadata read failed: %s", path, e)
+
+    waveform, sample_rate = ta.load(str(path))
+    if sample_rate <= 0:
+        raise RuntimeError(f"Invalid sample rate for {path}: {sample_rate}")
+    return waveform.shape[-1] / float(sample_rate)
+
+
 def build_items(paths: Sequence[Path]) -> list[AudioItem]:
     """Build duration metadata for readable audio files."""
     items: list[AudioItem] = []
 
     for p in paths:
         try:
-            metadata = torchaudio.info(str(p))
-            if metadata.num_frames > 0 and metadata.sample_rate > 0:
-                duration_s = metadata.num_frames / float(metadata.sample_rate)
-            else:
-                waveform, sample_rate = torchaudio.load(str(p))
-                duration_s = waveform.shape[-1] / float(sample_rate)
+            duration_s = audio_duration_s(p)
         except Exception as e:
             logging.warning("Skipping %s: failed to read audio (%s)", p, e)
             continue
@@ -207,6 +262,8 @@ def create_dataloader(
     pin_memory: bool,
 ) -> DataLoader:
     """Create the duration-bucketed audio dataloader."""
+    if DataLoader is None:
+        raise RuntimeError("ASR inference requires torch. Install the versions pinned in freeze.txt.")
     dataset = AudioDataset(items)
     batch_sampler = DurationBucketBatchSampler(
         items=items,
@@ -309,27 +366,29 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--max-batch-audio-s must be > 0")
 
 
-def torch_dtype_from_name(name: str) -> torch.dtype:
+def torch_dtype_from_name(name: str):
     """Map a CLI dtype name to a torch dtype."""
+    torch_lib = require_torch()
     mapping = {
-        "float16": torch.float16,
-        "bfloat16": torch.bfloat16,
-        "float32": torch.float32,
+        "float16": torch_lib.float16,
+        "bfloat16": torch_lib.bfloat16,
+        "float32": torch_lib.float32,
     }
     return mapping[name]
 
 
-def resolve_device_and_dtype(device_name: str, dtype_name: str) -> tuple[torch.device, torch.dtype]:
+def resolve_device_and_dtype(device_name: str, dtype_name: str) -> tuple:
     """Return a usable torch device and dtype, failing early for invalid CUDA use."""
-    device = torch.device(device_name)
-    if device.type == "cuda" and not torch.cuda.is_available():
+    torch_lib = require_torch()
+    device = torch_lib.device(device_name)
+    if device.type == "cuda" and not torch_lib.cuda.is_available():
         raise RuntimeError(
             "CUDA was requested but is not available. Use --device cpu or install CUDA support."
         )
     dtype = torch_dtype_from_name(dtype_name)
-    if device.type == "cpu" and dtype != torch.float32:
+    if device.type == "cpu" and dtype != torch_lib.float32:
         logging.warning("Using float32 on CPU instead of %s", dtype_name)
-        dtype = torch.float32
+        dtype = torch_lib.float32
     return device, dtype
 
 

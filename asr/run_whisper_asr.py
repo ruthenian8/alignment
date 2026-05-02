@@ -51,7 +51,7 @@ def main() -> None:
     logging.info("Loading Whisper model: %s", args.model_id)
     model = AutoModelForSpeechSeq2Seq.from_pretrained(
         args.model_id,
-        torch_dtype=dtype,
+        dtype=dtype,
         low_cpu_mem_usage=True,
         use_safetensors=True,
         attn_implementation=args.attn_implementation,

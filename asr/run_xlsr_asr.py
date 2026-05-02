@@ -54,7 +54,7 @@ def main() -> None:
     logging.info("Loading XLS-R model: %s", args.model_id)
     model = Wav2Vec2ForCTC.from_pretrained(
         args.model_id,
-        torch_dtype=dtype,
+        dtype=dtype,
         low_cpu_mem_usage=True,
     )
     model.to(device)
