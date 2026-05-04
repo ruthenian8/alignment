@@ -36,6 +36,8 @@ def build_cut_command(input_audio: Path | str, output_audio: Path | str, start: 
     command = [
         "ffmpeg",
         "-y",
+        "-v",
+        "error",
         "-ss",
         start,
         "-to",

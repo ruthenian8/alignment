@@ -29,6 +29,14 @@ class CorpusSample:
     reference_text: str
 
 
+@dataclass(frozen=True)
+class AsrPrediction:
+    """One ASR prediction row with an optional reference override."""
+
+    text: str
+    reference_path: Path | None = None
+
+
 def discover_samples(input_dir: Path | str, *, glob_pattern: str = "*.wav") -> list[CorpusSample]:
     """Find audio files that have sibling ``.txt`` reference files."""
     samples: list[CorpusSample] = []
@@ -55,28 +63,49 @@ def write_audio_manifest(samples: list[CorpusSample], output_path: Path | str) -
     path.write_text("\n".join(str(sample.audio_path) for sample in samples) + "\n", encoding="utf-8")
 
 
-def read_predictions(
-    path: Path | str, *, path_field: str = "path", text_field: str = "text"
-) -> dict[str, str]:
-    """Read JSONL or CSV ASR predictions keyed by resolved audio path."""
+def prediction_key(path: Path | str) -> str:
+    """Return the canonical path key used to join samples and predictions."""
+    return str(Path(path).resolve())
+
+
+def read_prediction_rows(path: Path | str) -> list[dict[str, object]]:
+    """Read JSONL or CSV ASR prediction rows without interpreting their schema."""
     input_path = Path(path)
-    rows: list[dict[str, object]] = []
     if input_path.suffix.lower() == ".jsonl":
         with input_path.open(encoding="utf-8-sig") as file:
-            rows = [json.loads(line) for line in file if line.strip()]
-    elif input_path.suffix.lower() == ".csv":
+            return [json.loads(line) for line in file if line.strip()]
+    if input_path.suffix.lower() == ".csv":
         with input_path.open(encoding="utf-8-sig", newline="") as file:
-            rows = list(csv.DictReader(file))
-    else:
-        raise ValueError("Predictions must be .jsonl or .csv")
+            return list(csv.DictReader(file))
+    raise ValueError("Predictions must be .jsonl or .csv")
 
-    predictions: dict[str, str] = {}
-    for row in rows:
+
+def read_predictions(
+    path: Path | str,
+    *,
+    path_field: str = "path",
+    text_field: str = "text",
+    reference_path_field: str = "reference_path",
+) -> dict[str, AsrPrediction]:
+    """Read JSONL or CSV ASR predictions keyed by resolved audio path."""
+    predictions: dict[str, AsrPrediction] = {}
+    for row in read_prediction_rows(path):
         if not row.get(path_field):
             continue
-        key = str(Path(str(row[path_field])).resolve())
-        predictions[key] = str(row.get(text_field, "")).strip()
+        key = prediction_key(str(row[path_field]))
+        reference_path = row.get(reference_path_field)
+        predictions[key] = AsrPrediction(
+            text=str(row.get(text_field, "")).strip(),
+            reference_path=Path(str(reference_path)) if reference_path else None,
+        )
     return predictions
+
+
+def missing_prediction_samples(
+    samples: list[CorpusSample], predictions: dict[str, AsrPrediction]
+) -> list[CorpusSample]:
+    """Return samples with no matching ASR prediction row."""
+    return [sample for sample in samples if prediction_key(sample.audio_path) not in predictions]
 
 
 def sample_wer(reference: str, hypothesis: str) -> tuple[int, int, int, int, Counter[tuple[str, str, str]]]:
@@ -99,14 +128,14 @@ def sample_wer(reference: str, hypothesis: str) -> tuple[int, int, int, int, Cou
 
 
 def evaluate_predictions(
-    samples: list[CorpusSample], predictions: dict[str, str]
+    samples: list[CorpusSample], predictions: dict[str, AsrPrediction]
 ) -> tuple[WerStats, Counter[tuple[str, str, str]], list[dict[str, object]]]:
     """Compute global and per-utterance WER for corpus predictions."""
     rows: list[dict[str, object]] = []
     mismatches: Counter[tuple[str, str, str]] = Counter()
     reference_words = substitutions = deletions = insertions = evaluated = 0
     for sample in samples:
-        key = str(sample.audio_path.resolve())
+        key = prediction_key(sample.audio_path)
         if key not in predictions:
             rows.append(
                 {
@@ -125,7 +154,13 @@ def evaluate_predictions(
             continue
 
         prediction = predictions[key]
-        ref_count, subs, dels, ins, sample_mismatches = sample_wer(sample.reference_text, prediction)
+        reference_path = prediction.reference_path or sample.reference_path
+        reference_text = (
+            reference_path.read_text(encoding="utf-8-sig").strip()
+            if prediction.reference_path
+            else sample.reference_text
+        )
+        ref_count, subs, dels, ins, sample_mismatches = sample_wer(reference_text, prediction.text)
         errors = subs + dels + ins
         evaluated += 1
         reference_words += ref_count
@@ -136,9 +171,9 @@ def evaluate_predictions(
         rows.append(
             {
                 "path": str(sample.audio_path),
-                "reference_path": str(sample.reference_path),
-                "reference": sample.reference_text,
-                "prediction": prediction,
+                "reference_path": str(reference_path),
+                "reference": reference_text,
+                "prediction": prediction.text,
                 "reference_words": ref_count,
                 "substitutions": subs,
                 "deletions": dels,
@@ -182,6 +217,11 @@ def write_mismatches(path: Path | str, mismatches: Counter[tuple[str, str, str]]
     write_csv(path, rows)
 
 
+def prefixed_output_path(output_dir: Path, prefix: str, filename: str) -> Path:
+    """Return an evaluation output path, optionally prefixed by prediction file name."""
+    return output_dir / (f"{prefix}.{filename}" if prefix else filename)
+
+
 def run_asr_command(command_template: str, *, input_dir: Path, manifest: Path, predictions: Path) -> None:
     """Run a model-specific ASR command with common corpus placeholders."""
     command = command_template.format(
@@ -191,6 +231,76 @@ def run_asr_command(command_template: str, *, input_dir: Path, manifest: Path, p
         output=str(predictions),
     )
     subprocess.run(shlex.split(command), check=True)
+
+
+def append_prediction_file(target: Path, addition: Path) -> None:
+    """Append a retry prediction file to the main prediction file."""
+    if not addition.exists():
+        return
+    if target.suffix.lower() != addition.suffix.lower():
+        raise ValueError("Retry predictions must use the same file extension as the main predictions")
+    if target.suffix.lower() == ".jsonl":
+        with target.open("a", encoding="utf-8") as output, addition.open(encoding="utf-8-sig") as input_file:
+            for line in input_file:
+                if line.strip():
+                    output.write(line if line.endswith("\n") else line + "\n")
+        return
+    if target.suffix.lower() == ".csv":
+        rows = read_prediction_rows(target) + read_prediction_rows(addition)
+        fieldnames = list(dict.fromkeys(field for row in rows for field in row))
+        with target.open("w", encoding="utf-8", newline="") as file:
+            writer = csv.DictWriter(file, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+        return
+    raise ValueError("Predictions must be .jsonl or .csv")
+
+
+def run_asr_with_retries(
+    command_template: str,
+    *,
+    input_dir: Path,
+    output_dir: Path,
+    samples: list[CorpusSample],
+    manifest: Path,
+    predictions: Path,
+    path_field: str,
+    text_field: str,
+    reference_path_field: str,
+    retry_missing: int,
+) -> dict[str, AsrPrediction]:
+    """Run ASR and retry missing prediction rows with smaller manifests."""
+    run_asr_command(command_template, input_dir=input_dir, manifest=manifest, predictions=predictions)
+    if not predictions.exists():
+        raise RuntimeError("ASR command completed but did not create a predictions file")
+
+    current = read_predictions(
+        predictions,
+        path_field=path_field,
+        text_field=text_field,
+        reference_path_field=reference_path_field,
+    )
+    for attempt in range(1, retry_missing + 1):
+        missing = missing_prediction_samples(samples, current)
+        if not missing:
+            break
+        retry_manifest = output_dir / f"missing_predictions_retry_{attempt}.txt"
+        retry_predictions = output_dir / f"predictions.retry{attempt}{predictions.suffix}"
+        write_audio_manifest(missing, retry_manifest)
+        run_asr_command(
+            command_template,
+            input_dir=input_dir,
+            manifest=retry_manifest,
+            predictions=retry_predictions,
+        )
+        append_prediction_file(predictions, retry_predictions)
+        current = read_predictions(
+            predictions,
+            path_field=path_field,
+            text_field=text_field,
+            reference_path_field=reference_path_field,
+        )
+    return current
 
 
 def parse_args() -> argparse.Namespace:
@@ -213,7 +323,23 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--prediction-path-field", default="path", help="Prediction row audio path field.")
     parser.add_argument("--prediction-text-field", default="text", help="Prediction row transcript field.")
-    parser.add_argument("--top", type=int, default=50, help="Mismatch count shown in wer_report.txt.")
+    parser.add_argument(
+        "--prediction-reference-path-field",
+        default="reference_path",
+        help="Optional prediction row field containing a reference text path.",
+    )
+    parser.add_argument(
+        "--retry-missing",
+        type=int,
+        default=1,
+        help="When running --asr-command, retry missing prediction rows this many times.",
+    )
+    parser.add_argument(
+        "--allow-missing-predictions",
+        action="store_true",
+        help="Do not fail when predictions are still missing after retries.",
+    )
+    parser.add_argument("--top", type=int, default=50, help="Mismatch count shown in the WER report.")
     parser.add_argument("--limit", type=int, help="Optional cap on discovered samples.")
     return parser.parse_args()
 
@@ -231,27 +357,46 @@ def main() -> None:
 
     manifest_path = output_dir / "audio_manifest.txt"
     predictions_path = args.predictions or output_dir / "predictions.jsonl"
+    output_prefix = predictions_path.stem if args.predictions else ""
     write_audio_manifest(samples, manifest_path)
     if args.asr_command:
-        run_asr_command(
+        predictions = run_asr_with_retries(
             args.asr_command,
             input_dir=args.input_dir,
+            output_dir=output_dir,
+            samples=samples,
             manifest=manifest_path,
             predictions=predictions_path,
+            path_field=args.prediction_path_field,
+            text_field=args.prediction_text_field,
+            reference_path_field=args.prediction_reference_path_field,
+            retry_missing=args.retry_missing,
         )
-    if not predictions_path.exists():
-        raise RuntimeError("No predictions file found. Provide --predictions or --asr-command.")
-
-    predictions = read_predictions(
-        predictions_path,
-        path_field=args.prediction_path_field,
-        text_field=args.prediction_text_field,
-    )
+    else:
+        if not predictions_path.exists():
+            raise RuntimeError("No predictions file found. Provide --predictions or --asr-command.")
+        predictions = read_predictions(
+            predictions_path,
+            path_field=args.prediction_path_field,
+            text_field=args.prediction_text_field,
+            reference_path_field=args.prediction_reference_path_field,
+        )
+    missing = missing_prediction_samples(samples, predictions)
+    if missing:
+        missing_path = prefixed_output_path(output_dir, output_prefix, "missing_predictions.txt")
+        write_audio_manifest(missing, missing_path)
+        if args.asr_command and not args.allow_missing_predictions:
+            raise RuntimeError(
+                f"ASR predictions are missing for {len(missing)} of {len(samples)} samples after "
+                f"{args.retry_missing} retry attempt(s). See {missing_path}."
+            )
     stats, mismatches, rows = evaluate_predictions(samples, predictions)
-    write_csv(output_dir / "per_utterance.csv", rows)
-    write_mismatches(output_dir / "mismatches.csv", mismatches)
+    write_csv(prefixed_output_path(output_dir, output_prefix, "per_utterance.csv"), rows)
+    write_mismatches(prefixed_output_path(output_dir, output_prefix, "mismatches.csv"), mismatches)
     report = format_wer_report(stats, mismatches, top=args.top)
-    (output_dir / "wer_report.txt").write_text(report + "\n", encoding="utf-8")
+    prefixed_output_path(output_dir, output_prefix, "wer_report.txt").write_text(
+        report + "\n", encoding="utf-8"
+    )
     print(report)
 
 

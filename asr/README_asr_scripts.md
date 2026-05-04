@@ -65,6 +65,11 @@ python asr/evaluate_corpus.py \
   --asr-command "python asr/run_whisper_asr.py --manifest {manifest} --output {predictions} --model-id openai/whisper-large-v3 --language russian --task transcribe --device cuda:0 --dtype float16"
 ```
 
+When `--asr-command` is used, the evaluator checks that every manifest path has a prediction.
+If a batch or worker drops rows, it writes `missing_predictions_retry_1.txt` and reruns the same
+command on only the missing files once by default. Use `--retry-missing N` to change the retry
+count, or `--allow-missing-predictions` to keep partial results after retries.
+
 GigaAM works the same way for utterance-level clips:
 
 ```bash
@@ -77,9 +82,15 @@ python asr/evaluate_corpus.py \
 Outputs:
 - `audio_manifest.txt`: audio paths passed to the ASR runner.
 - `predictions.jsonl`: default inference output path when `--asr-command` is used.
+- `missing_predictions.txt`: final missing paths when prediction coverage is incomplete.
 - `per_utterance.csv`: per-file reference, prediction, edit counts, and WER.
 - `mismatches.csv`: all substitutions, deletions, and insertions sorted by frequency.
 - `wer_report.txt`: global WER plus the most common error types.
+
+Existing prediction files may include a `reference_path` field. When present, `evaluate_corpus.py`
+uses that text file as the reference for the row; otherwise it uses the default sibling `.txt`
+next to the audio path. Use `--prediction-reference-path-field` if a copied prediction file uses a
+different field name.
 
 ## Recommended settings for a 40 GB GPU
 

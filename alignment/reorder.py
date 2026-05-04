@@ -12,12 +12,14 @@ from .io import JOINED_COLUMNS, parse_bool, read_tsv, write_tsv
 
 BRACKET_RE = re.compile(r"\[[^\]]*\]")
 TIME_RE = re.compile(r"\d{1,2}:\d{2}:\d{2}[,.]\d{3}")
+CHTS_EQUIVALENT_RE = re.compile(r"чц\+", re.IGNORECASE)
 
 
 def normalize_for_match(text: str) -> str:
     """Normalize text for rough matching while preserving originals elsewhere."""
     text = BRACKET_RE.sub(" ", text or "")
     text = TIME_RE.sub(" ", text)
+    text = CHTS_EQUIVALENT_RE.sub("ч", text)
     text = text.replace("\\", "").replace("ё", "е").replace("Ё", "Е")
     punctuation = string.punctuation + "«»“”„…—–"
     text = text.translate(str.maketrans({char: " " for char in punctuation}))

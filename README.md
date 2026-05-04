@@ -28,6 +28,7 @@ alignment align-srt data/whisper_srt/pez_001/pez_001No0.srt transcript.txt outpu
 alignment align-embeddings data/whisper_srt/pez_001/pez_001No0.srt transcript.txt outputs/pez_001No0_embs.tsv
 alignment wer outputs/pez_001No0.tsv --top 20
 alignment export-corpus chunk.wav outputs/pez_001No0.srt outputs/pez_001No0.srt outputs/clips outputs/manifest.tsv
+alignment export-aligned-map build/align-map-wx-transcripts-srt-speakers hf-repo/cut_audio build/cut_samples --manifest build/cut_samples/manifest.tsv
 ```
 
 Write derived files under `build/` or `outputs/`. Keep files in `data/` as source fixtures.
@@ -70,6 +71,11 @@ Human-facing intermediate files are UTF-8 TSV.
 - `start`, `end`, `speaker`: clip metadata.
 - `text`: clean output text.
 - `text_original`: original aligned text.
+
+`export-aligned-map` consumes `align-map` output laid out as `pez_001/aligned/pez_001No1.aligned.srt`
+and matching chunk audio laid out as `pez_001/pez_001No1.wav`. It writes the same directory shape as
+`cut_samples`: `pez_001/pez_001No1/001_SPEAKER_00_00-00-00-031.wav`, plus a normalized `.txt`
+caption and the original stressed/manual caption as `_orig.txt`.
 
 `align-embeddings` is an optional side path for the old embedding experiment. It removes bracketed interviewer prompts, segments dialect text around pauses, and aligns segment pairs with a lazily loaded `sentence-transformers` model. It is not the default aligner, and normal parser/alignment tests do not require external models.
 

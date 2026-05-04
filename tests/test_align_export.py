@@ -9,7 +9,7 @@ from alignment.align import (
     remove_alignment_notes,
 )
 from alignment.audio import build_cut_command
-from alignment.export import export_segments
+from alignment.export import export_aligned_srt_tree, export_segments, normalize_caption_text
 from alignment.srt import parse_srt
 
 
@@ -245,3 +245,51 @@ def test_export_rejects_non_wav_outputs(tmp_path: Path):
         assert ".wav" in str(error)
     else:
         raise AssertionError("Expected non-wav output to be rejected")
+
+
+def test_normalize_caption_text_removes_stress_marks_but_keeps_readable_text():
+    assert normalize_caption_text("Во­­­­­_т, ро\\дом  она\\.") == "Во­­­­­т, родом она."
+
+
+def test_export_aligned_srt_tree_matches_cut_samples_layout(tmp_path: Path):
+    aligned_root = tmp_path / "aligned-root"
+    audio_root = tmp_path / "audio"
+    aligned_dir = aligned_root / "pez_001" / "aligned"
+    audio_dir = audio_root / "pez_001"
+    aligned_dir.mkdir(parents=True)
+    audio_dir.mkdir(parents=True)
+    (audio_dir / "pez_001No1.wav").write_bytes(b"not real wav")
+    (aligned_dir / "pez_001No1.aligned.srt").write_text(
+        """
+1
+00:00:00,031 --> 00:00:01,250
+[SPEAKER_00]: Во­­­­­_т, ро\\дом.
+
+2
+00:00:01,250 --> 00:00:02,000
+[SPEAKER_01]: Да\\.
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with patch("alignment.export.subprocess.run") as run:
+        rows = export_aligned_srt_tree(
+            aligned_root,
+            audio_root,
+            tmp_path / "cut_samples",
+            tmp_path / "manifest.tsv",
+        )
+
+    first = tmp_path / "cut_samples" / "pez_001" / "pez_001No1" / "001_SPEAKER_00_00-00-00-031"
+    second = tmp_path / "cut_samples" / "pez_001" / "pez_001No1" / "002_SPEAKER_01_00-00-01-250"
+    assert len(rows) == 2
+    assert first.with_suffix(".txt").read_text(encoding="utf-8") == "Во­­­­­т, родом."
+    assert first.with_name(f"{first.name}_orig.txt").read_text(encoding="utf-8") == "Во­­­­­_т, ро\\дом."
+    assert second.with_suffix(".txt").read_text(encoding="utf-8") == "Да."
+    assert run.call_args_list[0].args[0] == build_cut_command(
+        audio_dir / "pez_001No1.wav",
+        first.with_suffix(".wav"),
+        "00:00:00.031",
+        "00:00:01.250",
+    )
+    assert (tmp_path / "manifest.tsv").exists()

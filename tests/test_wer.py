@@ -52,3 +52,7 @@ def test_normalize_for_wer_handles_partial_brackets_from_alignment_spans():
     assert normalize_for_wer("[Что за дом?] дом") == "дом"
     assert normalize_for_wer("Что за дом?] дом") == "дом"
     assert normalize_for_wer("[Что за дом?") == ""
+
+
+def test_normalize_for_wer_treats_chts_plus_as_ch():
+    assert normalize_for_wer("чц+еловек ЧЦ+то") == "человек что"

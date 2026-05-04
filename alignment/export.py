@@ -1,13 +1,16 @@
-"""Export aligned SRT rows as corpus clips, text files, and a manifest."""
+"""Export aligned SRT rows as corpus clips, text files, and manifests."""
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
 from .audio import build_cut_command
 from .io import MANIFEST_COLUMNS, write_tsv
 from .srt import SrtSegment, normalize_timestamp, parse_srt
+
+STRESS_MARK_RE = re.compile(r"[\\_\u0300\u0301]")
 
 
 def safe_time(timestamp: str) -> str:
@@ -17,8 +20,19 @@ def safe_time(timestamp: str) -> str:
 
 def clip_id(segment: SrtSegment) -> str:
     """Build a stable clip identifier from SRT index, speaker, and start time."""
-    speaker = segment.speaker.strip("[]:") or "UNKNOWN"
+    speaker = clean_speaker_code(segment.speaker)
     return f"{segment.index:03}_{speaker}_{safe_time(segment.start)}"
+
+
+def clean_speaker_code(speaker: str) -> str:
+    """Return a speaker code suitable for cut-sample filenames."""
+    return speaker.strip().strip("[]:") or "UNKNOWN"
+
+
+def normalize_caption_text(text: str) -> str:
+    """Normalize a caption for ASR references while preserving readable punctuation."""
+    text = STRESS_MARK_RE.sub("", text)
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def export_segments(
@@ -83,3 +97,78 @@ def export_srt_files(
         output_dir,
     )
     write_tsv(manifest_path, manifest, MANIFEST_COLUMNS)
+
+
+def export_aligned_srt(
+    input_audio: Path | str,
+    aligned_srt_path: Path | str,
+    output_dir: Path | str,
+    *,
+    run: bool = True,
+) -> list[dict[str, str]]:
+    """Cut one aligned SRT into wav, normalized txt, and original _orig.txt files."""
+    output = Path(output_dir)
+    output.mkdir(parents=True, exist_ok=True)
+    manifest = []
+    for segment in parse_srt(Path(aligned_srt_path).read_text(encoding="utf-8-sig")):
+        base = clip_id(segment)
+        audio_path = output / f"{base}.wav"
+        text_path = output / f"{base}.txt"
+        original_text_path = output / f"{base}_orig.txt"
+        command = build_cut_command(
+            input_audio,
+            audio_path,
+            normalize_timestamp(segment.start, decimal="."),
+            normalize_timestamp(segment.end, decimal="."),
+        )
+        if run:
+            subprocess.run(command, check=True)
+        text = normalize_caption_text(segment.text)
+        text_path.write_text(text, encoding="utf-8")
+        original_text_path.write_text(segment.text, encoding="utf-8")
+        manifest.append(
+            {
+                "clip_id": base,
+                "audio_path": str(audio_path),
+                "text_path": str(text_path),
+                "text_original_path": str(original_text_path),
+                "start": normalize_timestamp(segment.start, decimal="."),
+                "end": normalize_timestamp(segment.end, decimal="."),
+                "speaker": segment.speaker,
+                "text": text,
+                "text_original": segment.text,
+            }
+        )
+    return manifest
+
+
+def export_aligned_srt_tree(
+    aligned_root: Path | str,
+    audio_root: Path | str,
+    output_root: Path | str,
+    manifest_path: Path | str | None = None,
+    *,
+    run: bool = True,
+) -> list[dict[str, str]]:
+    """Export a tree of ``pez_x/aligned/*.aligned.srt`` files like ``cut_samples``."""
+    aligned_base = Path(aligned_root)
+    audio_base = Path(audio_root)
+    output_base = Path(output_root)
+    rows = []
+    for aligned_srt in sorted(aligned_base.glob("pez_*/aligned/*.aligned.srt")):
+        corpus = aligned_srt.parent.parent.name
+        chunk = aligned_srt.name.removesuffix(".aligned.srt")
+        audio_path = audio_base / corpus / f"{chunk}.wav"
+        if not audio_path.exists():
+            raise FileNotFoundError(f"Missing chunk audio for {aligned_srt}: {audio_path}")
+        rows.extend(
+            export_aligned_srt(
+                audio_path,
+                aligned_srt,
+                output_base / corpus / chunk,
+                run=run,
+            )
+        )
+    if manifest_path is not None:
+        write_tsv(manifest_path, rows, MANIFEST_COLUMNS)
+    return rows

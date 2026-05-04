@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .align import align_srt_file, write_aligned_tsv
 from .embeddings import align_pairs_with_embeddings, extract_dialect_text, write_embedded_alignment_tsv
-from .export import export_srt_files
+from .export import export_aligned_srt_tree, export_srt_files
 from .index_parser import write_index_tsv
 from .join import join_tsv
 from .mapping import align_mapping_table
@@ -84,6 +84,23 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("output_dir", type=Path, help="Directory for clip wav/txt files.")
     export.add_argument("manifest", type=Path, help="Output manifest TSV path.")
 
+    export_aligned = subparsers.add_parser(
+        "export-aligned-map",
+        help="Cut a tree of aligned SRT files into a cut_samples-style corpus layout.",
+    )
+    export_aligned.add_argument(
+        "aligned_root",
+        type=Path,
+        help="Root containing corpus/aligned/*.aligned.srt outputs from align-map.",
+    )
+    export_aligned.add_argument(
+        "audio_root",
+        type=Path,
+        help="Root containing matching chunk audio as corpus/chunk.wav.",
+    )
+    export_aligned.add_argument("output_root", type=Path, help="Output cut_samples-style root.")
+    export_aligned.add_argument("--manifest", type=Path, help="Optional output manifest TSV path.")
+
     align_embeddings = subparsers.add_parser(
         "align-embeddings",
         help="Optionally align dialect-only SRT/manual text pairs with sentence embeddings.",
@@ -150,6 +167,8 @@ def main(argv: list[str] | None = None) -> None:
         )
     elif args.command == "export-corpus":
         export_srt_files(args.audio, args.original_srt, args.clean_srt, args.output_dir, args.manifest)
+    elif args.command == "export-aligned-map":
+        export_aligned_srt_tree(args.aligned_root, args.audio_root, args.output_root, args.manifest)
     elif args.command == "align-embeddings":
         extraction = extract_dialect_text(
             args.srt.read_text(encoding="utf-8-sig"),
