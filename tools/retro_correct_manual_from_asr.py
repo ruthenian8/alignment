@@ -23,6 +23,7 @@ except ImportError:
 
 
 SENTENCE_RE = re.compile(r".+?(?:[.!?…]+(?:[\"»”)\]]+)?|$)", re.DOTALL)
+PHRASE_RE = re.compile(r".+?(?:[,;:]+|\s+[—–-]\s+|$)", re.DOTALL)
 DEFAULT_SUFFIX = ".asr_redacted"
 
 
@@ -51,6 +52,12 @@ def normalized_words(text: str) -> set[str]:
 def split_sentence_units(text: str) -> list[str]:
     """Split text into sentence-like units while preserving original spelling."""
     units = [match.group(0).strip() for match in SENTENCE_RE.finditer(text) if match.group(0).strip()]
+    return units or ([text.strip()] if text.strip() else [])
+
+
+def split_phrase_units(text: str) -> list[str]:
+    """Split text into shorter edge phrases while preserving punctuation."""
+    units = [match.group(0).strip() for match in PHRASE_RE.finditer(text) if match.group(0).strip()]
     return units or ([text.strip()] if text.strip() else [])
 
 
@@ -196,6 +203,8 @@ def build_decision(
 def relocate_orphan_spans(
     decisions: list[CorrectionDecision],
     predictions_by_model: dict[str, dict[Path, str]],
+    *,
+    relocate_phrases: bool = False,
 ) -> None:
     """Move trimmed edge spans to adjacent files when ASR overlap improves."""
     by_audio = {decision.audio_path: decision for decision in decisions}
@@ -219,6 +228,88 @@ def relocate_orphan_spans(
                 target_side="prefix",
                 predictions_by_model=predictions_by_model,
             )
+        if relocate_phrases:
+            relocate_edge_phrases(
+                decision=decision,
+                previous=by_audio[ordered_paths[index - 1]] if index > 0 else None,
+                following=by_audio[ordered_paths[index + 1]] if index + 1 < len(ordered_paths) else None,
+                predictions_by_model=predictions_by_model,
+            )
+
+
+def relocate_edge_phrases(
+    *,
+    decision: CorrectionDecision,
+    previous: CorrectionDecision | None,
+    following: CorrectionDecision | None,
+    predictions_by_model: dict[str, dict[Path, str]],
+) -> None:
+    """Move unsupported edge phrases to adjacent files when ASR overlap improves."""
+    if not decision.redacted_text or decision.possibly_misaligned:
+        return
+    source_prediction_word_sets = [
+        normalized_words(predictions[decision.audio_path]) for predictions in predictions_by_model.values()
+    ]
+    if following is not None:
+        phrase = orphan_suffix_phrase(decision.redacted_text, source_prediction_word_sets)
+        if phrase and maybe_relocate_span(
+            span=phrase,
+            source=decision,
+            target=following,
+            target_side="prefix",
+            predictions_by_model=predictions_by_model,
+        ):
+            decision.redacted_text = remove_suffix_phrase(decision.redacted_text, phrase)
+            decision.removed_suffix.append(phrase)
+    if previous is not None:
+        phrase = orphan_prefix_phrase(decision.redacted_text, source_prediction_word_sets)
+        if phrase and maybe_relocate_span(
+            span=phrase,
+            source=decision,
+            target=previous,
+            target_side="suffix",
+            predictions_by_model=predictions_by_model,
+        ):
+            decision.redacted_text = remove_prefix_phrase(decision.redacted_text, phrase)
+            decision.removed_prefix.append(phrase)
+
+
+def orphan_prefix_phrase(text: str, prediction_word_sets: list[set[str]]) -> str:
+    """Return a relocatable first phrase when it is shorter than the sentence."""
+    sentences = split_sentence_units(text)
+    if not sentences:
+        return ""
+    phrases = split_phrase_units(sentences[0])
+    if len(phrases) <= 1:
+        return ""
+    phrase = phrases[0]
+    return phrase if unit_absent_from_all(phrase, prediction_word_sets) else ""
+
+
+def orphan_suffix_phrase(text: str, prediction_word_sets: list[set[str]]) -> str:
+    """Return a relocatable last phrase when it is shorter than the sentence."""
+    sentences = split_sentence_units(text)
+    if not sentences:
+        return ""
+    phrases = split_phrase_units(sentences[-1])
+    if len(phrases) <= 1:
+        return ""
+    phrase = phrases[-1]
+    return phrase if unit_absent_from_all(phrase, prediction_word_sets) else ""
+
+
+def remove_prefix_phrase(text: str, phrase: str) -> str:
+    """Remove one exact phrase from the beginning of a text."""
+    if not text.startswith(phrase):
+        return text
+    return text[len(phrase) :].lstrip(" ,;:—–-").strip()
+
+
+def remove_suffix_phrase(text: str, phrase: str) -> str:
+    """Remove one exact phrase from the end of a text."""
+    if not text.endswith(phrase):
+        return text
+    return text[: -len(phrase)].rstrip(" ,;:—–-").strip()
 
 
 def maybe_relocate_span(
@@ -228,10 +319,10 @@ def maybe_relocate_span(
     target: CorrectionDecision,
     target_side: str,
     predictions_by_model: dict[str, dict[Path, str]],
-) -> None:
+) -> bool:
     """Relocate one span if it improves the adjacent target score."""
     if not span or source.text_path.parent != target.text_path.parent:
-        return
+        return False
     prediction_word_sets = [
         normalized_words(predictions[target.audio_path]) for predictions in predictions_by_model.values()
     ]
@@ -242,7 +333,7 @@ def maybe_relocate_span(
         else join_units([target.redacted_text, span])
     )
     if overlap_score(candidate_text, prediction_word_sets) <= current_score:
-        return
+        return False
     target.redacted_text = candidate_text
     if target_side == "prefix":
         source.relocated_suffix_to = target.audio_path
@@ -250,6 +341,7 @@ def maybe_relocate_span(
     else:
         source.relocated_prefix_to = target.audio_path
         target.received_suffix_from.append(source.audio_path)
+    return True
 
 
 def process_predictions(
@@ -259,6 +351,7 @@ def process_predictions(
     suffix: str = DEFAULT_SUFFIX,
     write_unchanged: bool = False,
     relocate_orphans: bool = False,
+    relocate_orphan_phrases: bool = False,
 ) -> list[dict[str, object]]:
     """Write redacted manual texts and return manifest rows."""
     predictions_by_model = {model_name(path): read_predictions(path) for path in prediction_files}
@@ -267,8 +360,12 @@ def process_predictions(
         for audio_path in common_audio_paths(predictions_by_model)
         if (decision := build_decision(audio_path, predictions_by_model)) is not None
     ]
-    if relocate_orphans:
-        relocate_orphan_spans(decisions, predictions_by_model)
+    if relocate_orphans or relocate_orphan_phrases:
+        relocate_orphan_spans(
+            decisions,
+            predictions_by_model,
+            relocate_phrases=relocate_orphan_phrases,
+        )
 
     rows: list[dict[str, object]] = []
     for decision in decisions:
@@ -352,6 +449,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "Move trimmed prefixes/suffixes to adjacent same-directory transcripts when ASR overlap improves."
         ),
     )
+    parser.add_argument(
+        "--relocate-orphan-phrases",
+        action="store_true",
+        help=(
+            "Also relocate unsupported comma/colon/dash-delimited edge phrases when adjacent ASR "
+            "overlap improves."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -364,6 +469,7 @@ def main(argv: list[str] | None = None) -> int:
         suffix=args.suffix,
         write_unchanged=args.write_unchanged,
         relocate_orphans=args.relocate_orphan_spans,
+        relocate_orphan_phrases=args.relocate_orphan_phrases,
     )
     changed = sum(row["changed"] is True for row in rows)
     misaligned = sum(row["possibly_misaligned"] is True for row in rows)

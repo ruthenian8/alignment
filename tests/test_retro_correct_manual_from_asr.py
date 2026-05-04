@@ -110,3 +110,65 @@ def test_process_predictions_does_not_relocate_without_score_gain(tmp_path: Path
     assert rows[0]["relocated_suffix_to"] == ""
     assert first_audio.with_suffix(".asr_redacted.txt").read_text(encoding="utf-8").strip() == "Первый текст."
     assert not second_audio.with_suffix(".asr_redacted.txt").exists()
+
+
+def test_process_predictions_relocates_short_suffix_phrase_when_enabled(tmp_path: Path) -> None:
+    """A comma-delimited edge phrase can move even when the full sentence is kept."""
+    chunk_dir = tmp_path / "cut_samples" / "pez_001" / "pez_001No0"
+    chunk_dir.mkdir(parents=True)
+    first_audio = chunk_dir / "001_SPEAKER_00_00-00-00-001.wav"
+    second_audio = chunk_dir / "002_SPEAKER_00_00-00-00-002.wav"
+    first_audio.touch()
+    second_audio.touch()
+    first_audio.with_suffix(".txt").write_text("Первый текст, сиротский фрагмент.\n", encoding="utf-8")
+    second_audio.with_suffix(".txt").write_text("Второй текст.\n", encoding="utf-8")
+    prediction_paths = write_prediction_files(
+        tmp_path,
+        [
+            (first_audio, "первый текст"),
+            (second_audio, "сиротский фрагмент второй текст"),
+        ],
+    )
+
+    rows = process_predictions(
+        prediction_paths,
+        manifest_path=tmp_path / "manifest.csv",
+        relocate_orphan_phrases=True,
+    )
+
+    assert rows[0]["removed_suffix_text"] == "сиротский фрагмент."
+    assert rows[0]["relocated_suffix_to"] == str(second_audio)
+    assert first_audio.with_suffix(".asr_redacted.txt").read_text(encoding="utf-8").strip() == "Первый текст"
+    assert (
+        second_audio.with_suffix(".asr_redacted.txt").read_text(encoding="utf-8").strip()
+        == "сиротский фрагмент. Второй текст."
+    )
+
+
+def test_process_predictions_keeps_short_phrase_relocation_disabled(tmp_path: Path) -> None:
+    """Phrase-level relocation is opt-in."""
+    chunk_dir = tmp_path / "cut_samples" / "pez_001" / "pez_001No0"
+    chunk_dir.mkdir(parents=True)
+    first_audio = chunk_dir / "001_SPEAKER_00_00-00-00-001.wav"
+    second_audio = chunk_dir / "002_SPEAKER_00_00-00-00-002.wav"
+    first_audio.touch()
+    second_audio.touch()
+    first_audio.with_suffix(".txt").write_text("Первый текст, сиротский фрагмент.\n", encoding="utf-8")
+    second_audio.with_suffix(".txt").write_text("Второй текст.\n", encoding="utf-8")
+    prediction_paths = write_prediction_files(
+        tmp_path,
+        [
+            (first_audio, "первый текст"),
+            (second_audio, "сиротский фрагмент второй текст"),
+        ],
+    )
+
+    rows = process_predictions(
+        prediction_paths,
+        manifest_path=tmp_path / "manifest.csv",
+        relocate_orphans=True,
+    )
+
+    assert rows[0]["removed_suffix_text"] == ""
+    assert rows[0]["changed"] is False
+    assert not first_audio.with_suffix(".asr_redacted.txt").exists()
