@@ -35,23 +35,19 @@ def normalize_caption_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def export_segments(
+def _export_srt_segments(
     input_audio: Path | str,
-    original_srt: str,
-    clean_srt: str,
+    segments: list[SrtSegment],
     output_dir: Path | str,
     *,
+    text_by_index: dict[int, str] | None = None,
     run: bool = True,
 ) -> list[dict[str, str]]:
-    """Cut audio clips and write original/clean text files from paired SRT strings."""
+    """Cut audio and write paired normalized/original text files for SRT segments."""
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
-    original_segments = parse_srt(original_srt)
-    clean_segments = parse_srt(clean_srt)
-    clean_by_index = {segment.index: segment for segment in clean_segments}
     manifest = []
-    for segment in original_segments:
-        clean = clean_by_index.get(segment.index, segment)
+    for segment in segments:
         base = clip_id(segment)
         audio_path = output / f"{base}.wav"
         text_path = output / f"{base}.txt"
@@ -64,7 +60,8 @@ def export_segments(
         )
         if run:
             subprocess.run(command, check=True)
-        text_path.write_text(clean.text, encoding="utf-8")
+        text = text_by_index.get(segment.index, segment.text) if text_by_index is not None else segment.text
+        text_path.write_text(text, encoding="utf-8")
         original_text_path.write_text(segment.text, encoding="utf-8")
         manifest.append(
             {
@@ -75,11 +72,32 @@ def export_segments(
                 "start": normalize_timestamp(segment.start, decimal="."),
                 "end": normalize_timestamp(segment.end, decimal="."),
                 "speaker": segment.speaker,
-                "text": clean.text,
+                "text": text,
                 "text_original": segment.text,
             }
         )
     return manifest
+
+
+def export_segments(
+    input_audio: Path | str,
+    original_srt: str,
+    clean_srt: str,
+    output_dir: Path | str,
+    *,
+    run: bool = True,
+) -> list[dict[str, str]]:
+    """Cut audio clips and write original/clean text files from paired SRT strings."""
+    original_segments = parse_srt(original_srt)
+    clean_segments = parse_srt(clean_srt)
+    clean_text_by_index = {segment.index: segment.text for segment in clean_segments}
+    return _export_srt_segments(
+        input_audio,
+        original_segments,
+        output_dir,
+        text_by_index=clean_text_by_index,
+        run=run,
+    )
 
 
 def export_srt_files(
@@ -107,39 +125,15 @@ def export_aligned_srt(
     run: bool = True,
 ) -> list[dict[str, str]]:
     """Cut one aligned SRT into wav, normalized txt, and original _orig.txt files."""
-    output = Path(output_dir)
-    output.mkdir(parents=True, exist_ok=True)
-    manifest = []
-    for segment in parse_srt(Path(aligned_srt_path).read_text(encoding="utf-8-sig")):
-        base = clip_id(segment)
-        audio_path = output / f"{base}.wav"
-        text_path = output / f"{base}.txt"
-        original_text_path = output / f"{base}_orig.txt"
-        command = build_cut_command(
-            input_audio,
-            audio_path,
-            normalize_timestamp(segment.start, decimal="."),
-            normalize_timestamp(segment.end, decimal="."),
-        )
-        if run:
-            subprocess.run(command, check=True)
-        text = normalize_caption_text(segment.text)
-        text_path.write_text(text, encoding="utf-8")
-        original_text_path.write_text(segment.text, encoding="utf-8")
-        manifest.append(
-            {
-                "clip_id": base,
-                "audio_path": str(audio_path),
-                "text_path": str(text_path),
-                "text_original_path": str(original_text_path),
-                "start": normalize_timestamp(segment.start, decimal="."),
-                "end": normalize_timestamp(segment.end, decimal="."),
-                "speaker": segment.speaker,
-                "text": text,
-                "text_original": segment.text,
-            }
-        )
-    return manifest
+    segments = parse_srt(Path(aligned_srt_path).read_text(encoding="utf-8-sig"))
+    clean_text_by_index = {segment.index: normalize_caption_text(segment.text) for segment in segments}
+    return _export_srt_segments(
+        input_audio,
+        segments,
+        output_dir,
+        text_by_index=clean_text_by_index,
+        run=run,
+    )
 
 
 def export_aligned_srt_tree(

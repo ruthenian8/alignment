@@ -16,6 +16,20 @@ from .transcript_parser import write_transcript_tsv
 from .wer import compute_wer_from_tsv, format_wer_report
 
 
+def add_transcript_speaker_args(parser: argparse.ArgumentParser) -> None:
+    """Add shared transcript-speaker replacement flags to an alignment command."""
+    parser.add_argument(
+        "--use-transcript-speakers",
+        action="store_true",
+        help="Replace SRT speaker codes with bracketed speaker tags from the manual transcript.",
+    )
+    parser.add_argument(
+        "--infer-missing-speakers",
+        action="store_true",
+        help="Carry the last bracketed transcript speaker tag forward across following aligned segments.",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the top-level CLI parser."""
     parser = argparse.ArgumentParser(prog="alignment", description="Build aligned speech-corpus data.")
@@ -46,16 +60,7 @@ def build_parser() -> argparse.ArgumentParser:
     align.add_argument("output_srt", type=Path, help="Output aligned SRT path.")
     align.add_argument("--output-tsv", type=Path, help="Optional output aligned TSV path.")
     align.add_argument("--index-name", default="", help="Index/chunk name recorded in aligned TSV.")
-    align.add_argument(
-        "--use-transcript-speakers",
-        action="store_true",
-        help="Replace SRT speaker codes with bracketed speaker tags from the manual transcript.",
-    )
-    align.add_argument(
-        "--infer-missing-speakers",
-        action="store_true",
-        help="Carry the last bracketed transcript speaker tag forward across following aligned segments.",
-    )
+    add_transcript_speaker_args(align)
 
     align_map = subparsers.add_parser(
         "align-map",
@@ -66,16 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
     align_map.add_argument(
         "output_dir", type=Path, help="Directory for manual, aligned, and summary outputs."
     )
-    align_map.add_argument(
-        "--use-transcript-speakers",
-        action="store_true",
-        help="Replace SRT speaker codes with bracketed speaker tags from the manual transcript.",
-    )
-    align_map.add_argument(
-        "--infer-missing-speakers",
-        action="store_true",
-        help="Carry the last bracketed transcript speaker tag forward across following aligned segments.",
-    )
+    add_transcript_speaker_args(align_map)
 
     export = subparsers.add_parser("export-corpus", help="Cut audio clips and write text plus manifest.")
     export.add_argument("audio", type=Path, help="Input audio chunk.")
