@@ -117,8 +117,30 @@ def join_units(units: list[str]) -> str:
     return " ".join(unit for unit in units if unit).strip()
 
 
-def redacted_path_for(source_path: Path, suffix: str) -> Path:
+def relative_to_root(path: Path, root: Path) -> Path:
+    """Return ``path`` relative to ``root`` with a clear error on mismatch."""
+    try:
+        return path.relative_to(root)
+    except ValueError:
+        try:
+            return path.resolve().relative_to(root.resolve())
+        except ValueError as error:
+            raise ValueError(f"{path} is not under reference root {root}") from error
+
+
+def redacted_path_for(
+    source_path: Path,
+    suffix: str,
+    *,
+    output_root: Path | None = None,
+    reference_root: Path | None = None,
+) -> Path:
     """Return sibling redacted text path for a source reference file."""
+    if output_root is not None:
+        if reference_root is None:
+            raise ValueError("reference_root is required when output_root is set")
+        relative_path = relative_to_root(source_path, reference_root)
+        return (output_root / relative_path).with_name(f"{source_path.stem}{suffix}{source_path.suffix}")
     return source_path.with_name(f"{source_path.stem}{suffix}{source_path.suffix}")
 
 
@@ -349,6 +371,8 @@ def process_predictions(
     *,
     manifest_path: Path,
     suffix: str = DEFAULT_SUFFIX,
+    output_root: Path | None = None,
+    reference_root: Path | None = None,
     write_unchanged: bool = False,
     relocate_orphans: bool = False,
     relocate_orphan_phrases: bool = False,
@@ -369,8 +393,14 @@ def process_predictions(
 
     rows: list[dict[str, object]] = []
     for decision in decisions:
-        redacted_path = redacted_path_for(decision.text_path, suffix)
+        redacted_path = redacted_path_for(
+            decision.text_path,
+            suffix,
+            output_root=output_root,
+            reference_root=reference_root,
+        )
         if decision.source_text != decision.redacted_text or write_unchanged:
+            redacted_path.parent.mkdir(parents=True, exist_ok=True)
             redacted_path.write_text(
                 decision.redacted_text + ("\n" if decision.redacted_text else ""),
                 encoding="utf-8",
@@ -438,6 +468,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Suffix inserted before .txt for redacted manual files.",
     )
     parser.add_argument(
+        "--output-root",
+        type=Path,
+        help=(
+            "Optional root for redacted reference files. When set, files are written under this "
+            "root preserving paths relative to --reference-root instead of next to source .txt files."
+        ),
+    )
+    parser.add_argument(
+        "--reference-root",
+        type=Path,
+        help="Source reference root used to derive relative paths when --output-root is set.",
+    )
+    parser.add_argument(
         "--write-unchanged",
         action="store_true",
         help="Also write redacted copies for unchanged source text files.",
@@ -467,6 +510,8 @@ def main(argv: list[str] | None = None) -> int:
         args.prediction_files,
         manifest_path=args.manifest,
         suffix=args.suffix,
+        output_root=args.output_root,
+        reference_root=args.reference_root,
         write_unchanged=args.write_unchanged,
         relocate_orphans=args.relocate_orphan_spans,
         relocate_orphan_phrases=args.relocate_orphan_phrases,

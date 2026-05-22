@@ -172,3 +172,28 @@ def test_process_predictions_keeps_short_phrase_relocation_disabled(tmp_path: Pa
     assert rows[0]["removed_suffix_text"] == ""
     assert rows[0]["changed"] is False
     assert not first_audio.with_suffix(".asr_redacted.txt").exists()
+
+
+def test_process_predictions_can_write_redactions_under_output_root(tmp_path: Path) -> None:
+    """Redacted references can be kept out of the source cut-sample tree."""
+    reference_root = tmp_path / "cut_samples"
+    chunk_dir = reference_root / "pez_001" / "pez_001No0"
+    output_root = tmp_path / "build" / "redacted_refs"
+    chunk_dir.mkdir(parents=True)
+    audio_path = chunk_dir / "001_SPEAKER_00_00-00-00-001.wav"
+    audio_path.touch()
+    text_path = audio_path.with_suffix(".txt")
+    text_path.write_text("Лишнее. Основной текст.\n", encoding="utf-8")
+    prediction_paths = write_prediction_files(tmp_path, [(audio_path, "основной текст")])
+
+    rows = process_predictions(
+        prediction_paths,
+        manifest_path=tmp_path / "manifest.csv",
+        output_root=output_root,
+        reference_root=reference_root,
+    )
+
+    expected_path = output_root / "pez_001" / "pez_001No0" / "001_SPEAKER_00_00-00-00-001.asr_redacted.txt"
+    assert rows[0]["redacted_path"] == str(expected_path)
+    assert expected_path.read_text(encoding="utf-8").strip() == "Основной текст."
+    assert not text_path.with_suffix(".asr_redacted.txt").exists()

@@ -34,7 +34,7 @@ Notes:
 - GigaAM uses the same discovery and output format, but calls the upstream short-clip `transcribe()` API
   rather than the batched Hugging Face processor path.
 
-## Corpus WER for cut samples
+## Corpus WER/CER for cut samples
 
 `evaluate_corpus.py` expects utterance-level files laid out like `cut_samples/pez_001/pez_001No1/`:
 
@@ -83,9 +83,9 @@ Outputs:
 - `audio_manifest.txt`: audio paths passed to the ASR runner.
 - `predictions.jsonl`: default inference output path when `--asr-command` is used.
 - `missing_predictions.txt`: final missing paths when prediction coverage is incomplete.
-- `per_utterance.csv`: per-file reference, prediction, edit counts, and WER.
+- `per_utterance.csv`: per-file reference, prediction, word/character edit counts, WER, and CER.
 - `mismatches.csv`: all substitutions, deletions, and insertions sorted by frequency.
-- `wer_report.txt`: global WER plus the most common error types.
+- `wer_report.txt`: global WER/CER plus the most common word error types.
 
 Existing prediction files may include a `reference_path` field. When present, `evaluate_corpus.py`
 uses that text file as the reference for the row; otherwise it uses the default sibling `.txt`

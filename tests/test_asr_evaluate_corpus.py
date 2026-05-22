@@ -14,6 +14,7 @@ from asr.evaluate_corpus import (
     missing_prediction_samples,
     read_predictions,
     run_asr_with_retries,
+    sample_cer,
     write_audio_manifest,
 )
 
@@ -54,14 +55,26 @@ def test_read_predictions_and_evaluate_global_wer(tmp_path: Path) -> None:
 
     samples = discover_samples(tmp_path)
     predictions = read_predictions(predictions_path)
-    stats, mismatches, rows = evaluate_predictions(samples, predictions)
+    stats, cer_stats, mismatches, rows = evaluate_predictions(samples, predictions)
 
     assert stats.rows == 2
     assert stats.reference_words == 4
     assert stats.substitutions == 1
     assert stats.wer == 0.25
+    assert cer_stats.reference_chars == 21
+    assert cer_stats.substitutions == 2
+    assert cer_stats.cer == pytest.approx(2 / 21)
     assert mismatches[("substitute", "дом", "кот")] == 1
     assert [row["status"] for row in rows] == ["evaluated", "evaluated"]
+    assert rows[0]["reference_chars"] == 10
+    assert rows[0]["cer"] == pytest.approx(2 / 10)
+
+
+def test_sample_cer_uses_normalized_text_without_bracketed_notes() -> None:
+    ref_count, subs, dels, ins = sample_cer("[Соб.: шум] чц+еловек", "человек")
+
+    assert ref_count == 7
+    assert (subs, dels, ins) == (0, 0, 0)
 
 
 def test_evaluate_predictions_uses_prediction_reference_path_when_provided(tmp_path: Path) -> None:
@@ -94,7 +107,7 @@ def test_evaluate_predictions_uses_prediction_reference_path_when_provided(tmp_p
 
     samples = discover_samples(tmp_path)
     predictions = read_predictions(predictions_path)
-    stats, _mismatches, rows = evaluate_predictions(samples, predictions)
+    stats, _cer_stats, _mismatches, rows = evaluate_predictions(samples, predictions)
 
     assert stats.wer == 0
     assert rows[0]["reference_path"] == str(relocated)
@@ -131,6 +144,7 @@ def test_main_prefixes_outputs_with_prediction_file_name(
     assert (output_dir / "gigaam_preds.per_utterance.csv").exists()
     assert (output_dir / "gigaam_preds.mismatches.csv").exists()
     assert (output_dir / "gigaam_preds.wer_report.txt").exists()
+    assert "cer\t0.0000" in (output_dir / "gigaam_preds.wer_report.txt").read_text(encoding="utf-8")
     assert not (output_dir / "per_utterance.csv").exists()
 
 

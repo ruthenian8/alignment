@@ -1,4 +1,4 @@
-"""Run optional ASR inference and evaluate utterance-level corpus WER."""
+"""Run optional ASR inference and evaluate utterance-level corpus WER and CER."""
 
 from __future__ import annotations
 
@@ -35,6 +35,17 @@ class AsrPrediction:
 
     text: str
     reference_path: Path | None = None
+
+
+@dataclass(frozen=True)
+class CerStats:
+    """Global CER counts computed over utterance-level predictions."""
+
+    reference_chars: int
+    substitutions: int
+    deletions: int
+    insertions: int
+    cer: float
 
 
 def discover_samples(input_dir: Path | str, *, glob_pattern: str = "*.wav") -> list[CorpusSample]:
@@ -127,13 +138,34 @@ def sample_wer(reference: str, hypothesis: str) -> tuple[int, int, int, int, Cou
     return len(reference_words), substitutions, deletions, insertions, mismatches
 
 
+def normalized_chars(text: str) -> list[str]:
+    """Return normalized non-space characters for CER."""
+    return [char for char in normalize_for_wer(text) if not char.isspace()]
+
+
+def sample_cer(reference: str, hypothesis: str) -> tuple[int, int, int, int]:
+    """Return reference character length and edit counts for one sample."""
+    reference_chars = normalized_chars(reference)
+    hypothesis_chars = normalized_chars(hypothesis)
+    substitutions = deletions = insertions = 0
+    for op, _ref_char, _hyp_char in edit_operations(reference_chars, hypothesis_chars):
+        if op == "substitute":
+            substitutions += 1
+        elif op == "delete":
+            deletions += 1
+        elif op == "insert":
+            insertions += 1
+    return len(reference_chars), substitutions, deletions, insertions
+
+
 def evaluate_predictions(
     samples: list[CorpusSample], predictions: dict[str, AsrPrediction]
-) -> tuple[WerStats, Counter[tuple[str, str, str]], list[dict[str, object]]]:
-    """Compute global and per-utterance WER for corpus predictions."""
+) -> tuple[WerStats, CerStats, Counter[tuple[str, str, str]], list[dict[str, object]]]:
+    """Compute global and per-utterance WER/CER for corpus predictions."""
     rows: list[dict[str, object]] = []
     mismatches: Counter[tuple[str, str, str]] = Counter()
     reference_words = substitutions = deletions = insertions = evaluated = 0
+    reference_chars = char_substitutions = char_deletions = char_insertions = 0
     for sample in samples:
         key = prediction_key(sample.audio_path)
         if key not in predictions:
@@ -148,6 +180,11 @@ def evaluate_predictions(
                     "deletions": 0,
                     "insertions": 0,
                     "wer": "",
+                    "reference_chars": 0,
+                    "char_substitutions": 0,
+                    "char_deletions": 0,
+                    "char_insertions": 0,
+                    "cer": "",
                     "status": "missing_prediction",
                 }
             )
@@ -161,12 +198,18 @@ def evaluate_predictions(
             else sample.reference_text
         )
         ref_count, subs, dels, ins, sample_mismatches = sample_wer(reference_text, prediction.text)
+        char_count, char_subs, char_dels, char_ins = sample_cer(reference_text, prediction.text)
         errors = subs + dels + ins
+        char_errors = char_subs + char_dels + char_ins
         evaluated += 1
         reference_words += ref_count
         substitutions += subs
         deletions += dels
         insertions += ins
+        reference_chars += char_count
+        char_substitutions += char_subs
+        char_deletions += char_dels
+        char_insertions += char_ins
         mismatches.update(sample_mismatches)
         rows.append(
             {
@@ -179,11 +222,17 @@ def evaluate_predictions(
                 "deletions": dels,
                 "insertions": ins,
                 "wer": 0.0 if ref_count == 0 else errors / ref_count,
+                "reference_chars": char_count,
+                "char_substitutions": char_subs,
+                "char_deletions": char_dels,
+                "char_insertions": char_ins,
+                "cer": 0.0 if char_count == 0 else char_errors / char_count,
                 "status": "evaluated",
             }
         )
 
     total_errors = substitutions + deletions + insertions
+    total_char_errors = char_substitutions + char_deletions + char_insertions
     stats = WerStats(
         rows=evaluated,
         reference_words=reference_words,
@@ -192,7 +241,34 @@ def evaluate_predictions(
         insertions=insertions,
         wer=0.0 if reference_words == 0 else total_errors / reference_words,
     )
-    return stats, mismatches, rows
+    cer_stats = CerStats(
+        reference_chars=reference_chars,
+        substitutions=char_substitutions,
+        deletions=char_deletions,
+        insertions=char_insertions,
+        cer=0.0 if reference_chars == 0 else total_char_errors / reference_chars,
+    )
+    return stats, cer_stats, mismatches, rows
+
+
+def format_asr_report(
+    stats: WerStats,
+    cer_stats: CerStats,
+    mismatches: Counter[tuple[str, str, str]],
+    *,
+    top: int = 20,
+) -> str:
+    """Format global WER/CER stats and the most common word mismatches."""
+    report = format_wer_report(stats, mismatches, top=top).splitlines()
+    insert_at = report.index("") if "" in report else len(report)
+    cer_lines = [
+        f"reference_chars\t{cer_stats.reference_chars}",
+        f"cer\t{cer_stats.cer:.4f}",
+        f"char_substitutions\t{cer_stats.substitutions}",
+        f"char_deletions\t{cer_stats.deletions}",
+        f"char_insertions\t{cer_stats.insertions}",
+    ]
+    return "\n".join(report[:insert_at] + cer_lines + report[insert_at:])
 
 
 def write_csv(path: Path | str, rows: list[dict[str, object]]) -> None:
@@ -306,12 +382,12 @@ def run_asr_with_retries(
 def parse_args() -> argparse.Namespace:
     """Parse corpus ASR evaluation arguments."""
     parser = argparse.ArgumentParser(
-        description="Run ASR over utterance-level cut samples and compute corpus WER."
+        description="Run ASR over utterance-level cut samples and compute corpus WER/CER."
     )
     parser.add_argument(
         "input_dir", type=Path, help="Corpus root containing .wav files with sibling .txt files."
     )
-    parser.add_argument("output_dir", type=Path, help="Directory for manifest, predictions, and WER outputs.")
+    parser.add_argument("output_dir", type=Path, help="Directory for manifest, predictions, and evaluation outputs.")
     parser.add_argument("--glob", default="*.wav", help="Recursive audio glob under input_dir.")
     parser.add_argument("--predictions", type=Path, help="Existing .jsonl or .csv predictions to evaluate.")
     parser.add_argument(
@@ -390,10 +466,10 @@ def main() -> None:
                 f"ASR predictions are missing for {len(missing)} of {len(samples)} samples after "
                 f"{args.retry_missing} retry attempt(s). See {missing_path}."
             )
-    stats, mismatches, rows = evaluate_predictions(samples, predictions)
+    stats, cer_stats, mismatches, rows = evaluate_predictions(samples, predictions)
     write_csv(prefixed_output_path(output_dir, output_prefix, "per_utterance.csv"), rows)
     write_mismatches(prefixed_output_path(output_dir, output_prefix, "mismatches.csv"), mismatches)
-    report = format_wer_report(stats, mismatches, top=args.top)
+    report = format_asr_report(stats, cer_stats, mismatches, top=args.top)
     prefixed_output_path(output_dir, output_prefix, "wer_report.txt").write_text(
         report + "\n", encoding="utf-8"
     )
