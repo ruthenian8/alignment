@@ -4,6 +4,7 @@ from unittest.mock import patch
 from alignment.align import (
     align_segments,
     align_srt_file,
+    aligned_to_speaker_map_rows,
     aligned_to_srt,
     apply_transcript_speakers,
     remove_alignment_notes,
@@ -39,6 +40,75 @@ def test_alignment_marks_skipped_segments_explicitly():
     assert aligned[0].transcript_text == ""
 
 
+def test_alignment_can_skip_leading_manual_context():
+    srt = parse_srt(
+        """
+1
+00:00:00,000 --> 00:00:01,000
+[SPEAKER_00]: потому что не уронили
+
+2
+00:00:01,000 --> 00:00:02,000
+[SPEAKER_00]: там неправильно
+""".strip()
+    )
+    transcript = (
+        "[Соб. длинное описание праздника. Соб.: А почему не пускали детей?] "
+        "А потому\\ что не урони\\ли там, непра\\вильно."
+    )
+
+    aligned = align_segments(
+        srt,
+        transcript,
+        max_span=5,
+        similarity_threshold=0.2,
+        allow_leading_transcript_skip=True,
+    )
+
+    assert [item.matched for item in aligned] == [True, True]
+    assert "потому\\ что не урони\\ли" in aligned[0].transcript_text
+    assert "там, непра\\вильно" in aligned[1].transcript_text
+
+
+def test_leading_speaker_marker_carries_after_skipped_context():
+    srt = parse_srt("1\n00:00:00,000 --> 00:00:01,000\n[SPEAKER_00]: ручной ответ\n")
+    long_context = " ".join(["контекст"] * 80)
+    transcript = f"[Л:] [{long_context}. Соб.: Вопрос?] Ручно\\й отве\\т."
+
+    aligned = align_segments(
+        srt,
+        transcript,
+        similarity_threshold=0.2,
+        allow_leading_transcript_skip=True,
+    )
+    updated = apply_transcript_speakers(aligned, transcript, infer_missing=True)
+
+    assert updated[0].matched is True
+    assert updated[0].srt.speaker == "[Л]:"
+    assert updated[0].speaker_source == "carried_forward_prev"
+
+
+def test_alignment_can_require_starting_at_first_manual_token():
+    srt = parse_srt("1\n00:00:00,000 --> 00:00:01,000\n[SPEAKER_00]: ответ\n")
+
+    aligned = align_segments(
+        srt,
+        "лишний контекст ответ",
+        similarity_threshold=0.8,
+        allow_leading_transcript_skip=False,
+    )
+
+    assert aligned[0].matched is False
+
+
+def test_alignment_does_not_force_unrelated_text_after_leading_skip():
+    srt = parse_srt("1\n00:00:00,000 --> 00:00:01,000\n[SPEAKER_00]: unrelated\n")
+
+    aligned = align_segments(srt, "лишний контекст ручной текст", similarity_threshold=0.9)
+
+    assert aligned[0].matched is False
+
+
 def test_transcript_speaker_tags_can_replace_srt_speakers():
     srt = parse_srt(
         """
@@ -60,6 +130,10 @@ def test_transcript_speaker_tags_can_replace_srt_speakers():
     updated = apply_transcript_speakers(aligned, transcript, infer_missing=True)
     assert [item.srt.speaker for item in updated] == ["[ААК]:", "[ААК]:", "[РВВ]:"]
     assert "[ААК]: до\\брый день" in aligned_to_srt(updated)
+    speaker_rows = aligned_to_speaker_map_rows(updated)
+    assert speaker_rows[0]["whisperx_speaker"] == "[SPEAKER_00]:"
+    assert speaker_rows[0]["transcript_speaker"] == "[ААК]:"
+    assert speaker_rows[1]["speaker_source"] == "preceding_marker"
 
 
 def test_unknown_bracket_questions_and_nonstandard_speakers_replace_srt_speakers():
@@ -96,6 +170,15 @@ def test_collector_bracket_replaces_srt_speaker_with_unknown():
     transcript = "[Соб.: Ребя\\та, расскажи\\те?]"
     aligned = align_segments(srt, transcript, max_span=5, similarity_threshold=0.2)
     updated = apply_transcript_speakers(aligned, transcript)
+    assert updated[0].srt.speaker == "[UNK]:"
+
+
+def test_declarative_collector_bracket_replaces_srt_speaker_with_unknown():
+    srt = parse_srt("1\n00:00:00,000 --> 00:00:01,000\n[SPEAKER_00]: да\n")
+    transcript = "[Соб.: Да.]"
+    aligned = align_segments(srt, transcript, max_span=5, similarity_threshold=0.2)
+    updated = apply_transcript_speakers(aligned, transcript)
+    assert updated[0].matched
     assert updated[0].srt.speaker == "[UNK]:"
 
 
@@ -254,12 +337,19 @@ def test_normalize_caption_text_removes_stress_marks_but_keeps_readable_text():
 def test_export_aligned_srt_tree_matches_cut_samples_layout(tmp_path: Path):
     aligned_root = tmp_path / "aligned-root"
     audio_root = tmp_path / "audio"
-    aligned_dir = aligned_root / "pez_001" / "aligned"
-    audio_dir = audio_root / "pez_001"
+    aligned_dir = aligned_root / "and_001" / "aligned"
+    speaker_map_dir = aligned_root / "and_001" / "speaker_maps"
+    audio_dir = audio_root / "and_001"
     aligned_dir.mkdir(parents=True)
+    speaker_map_dir.mkdir(parents=True)
     audio_dir.mkdir(parents=True)
-    (audio_dir / "pez_001No1.wav").write_bytes(b"not real wav")
-    (aligned_dir / "pez_001No1.aligned.srt").write_text(
+    (audio_dir / "and_001No1.wav").write_bytes(b"not real wav")
+    (speaker_map_dir / "and_001No1.speaker_map.csv").write_text(
+        "srt_index,start,end,whisperx_speaker,transcript_speaker,speaker_source,matched,score\n"
+        '1,"00:00:00,031","00:00:01,250",[SPEAKER_00]:,[АБ]:,preceding_marker,True,1.000\n',
+        encoding="utf-8",
+    )
+    (aligned_dir / "and_001No1.aligned.srt").write_text(
         """
 1
 00:00:00,031 --> 00:00:01,250
@@ -280,16 +370,17 @@ def test_export_aligned_srt_tree_matches_cut_samples_layout(tmp_path: Path):
             tmp_path / "manifest.tsv",
         )
 
-    first = tmp_path / "cut_samples" / "pez_001" / "pez_001No1" / "001_SPEAKER_00_00-00-00-031"
-    second = tmp_path / "cut_samples" / "pez_001" / "pez_001No1" / "002_SPEAKER_01_00-00-01-250"
+    first = tmp_path / "cut_samples" / "and_001" / "and_001No1" / "001_SPEAKER_00_00-00-00-031"
+    second = tmp_path / "cut_samples" / "and_001" / "and_001No1" / "002_SPEAKER_01_00-00-01-250"
     assert len(rows) == 2
     assert first.with_suffix(".txt").read_text(encoding="utf-8") == "Во­­­­­т, родом."
     assert first.with_name(f"{first.name}_orig.txt").read_text(encoding="utf-8") == "Во­­­­­_т, ро\\дом."
     assert second.with_suffix(".txt").read_text(encoding="utf-8") == "Да."
     assert run.call_args_list[0].args[0] == build_cut_command(
-        audio_dir / "pez_001No1.wav",
+        audio_dir / "and_001No1.wav",
         first.with_suffix(".wav"),
         "00:00:00.031",
         "00:00:01.250",
     )
+    assert (first.parent / "speaker_map.csv").read_text(encoding="utf-8").startswith("srt_index,start")
     assert (tmp_path / "manifest.tsv").exists()

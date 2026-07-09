@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -144,12 +145,12 @@ def export_aligned_srt_tree(
     *,
     run: bool = True,
 ) -> list[dict[str, str]]:
-    """Export a tree of ``pez_x/aligned/*.aligned.srt`` files like ``cut_samples``."""
+    """Export a tree of ``corpus/aligned/*.aligned.srt`` files like ``cut_samples``."""
     aligned_base = Path(aligned_root)
     audio_base = Path(audio_root)
     output_base = Path(output_root)
     rows = []
-    for aligned_srt in sorted(aligned_base.glob("pez_*/aligned/*.aligned.srt")):
+    for aligned_srt in sorted(aligned_base.glob("*/aligned/*.aligned.srt")):
         corpus = aligned_srt.parent.parent.name
         chunk = aligned_srt.name.removesuffix(".aligned.srt")
         audio_path = audio_base / corpus / f"{chunk}.wav"
@@ -163,6 +164,11 @@ def export_aligned_srt_tree(
                 run=run,
             )
         )
+        speaker_map = aligned_base / corpus / "speaker_maps" / f"{chunk}.speaker_map.csv"
+        if speaker_map.exists():
+            target_dir = output_base / corpus / chunk
+            target_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(speaker_map, target_dir / "speaker_map.csv")
     if manifest_path is not None:
         write_tsv(manifest_path, rows, MANIFEST_COLUMNS)
     return rows

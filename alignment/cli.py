@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from .align import align_srt_file, write_aligned_tsv
+from .align import align_srt_file, write_aligned_tsv, write_speaker_map
 from .embeddings import align_pairs_with_embeddings, extract_dialect_text, write_embedded_alignment_tsv
 from .export import export_aligned_srt_tree, export_srt_files
 from .index_parser import write_index_tsv
@@ -59,7 +59,18 @@ def build_parser() -> argparse.ArgumentParser:
     align.add_argument("transcript", type=Path, help="Manual transcript text file.")
     align.add_argument("output_srt", type=Path, help="Output aligned SRT path.")
     align.add_argument("--output-tsv", type=Path, help="Optional output aligned TSV path.")
+    align.add_argument("--output-speaker-map", type=Path, help="Optional output speaker-map CSV path.")
     align.add_argument("--index-name", default="", help="Index/chunk name recorded in aligned TSV.")
+    align.add_argument(
+        "--speaker-hint",
+        default="",
+        help="Optional actual speaker tag used for matched rows without explicit transcript speakers.",
+    )
+    align.add_argument(
+        "--allow-leading-transcript-skip",
+        action="store_true",
+        help="Allow alignment to start after leading manual transcript context.",
+    )
     add_transcript_speaker_args(align)
 
     align_map = subparsers.add_parser(
@@ -150,9 +161,13 @@ def main(argv: list[str] | None = None) -> None:
             args.output_srt,
             use_transcript_speakers=args.use_transcript_speakers,
             infer_missing_speakers=args.infer_missing_speakers,
+            fallback_speaker=args.speaker_hint.strip().strip("[]:"),
+            allow_leading_transcript_skip=args.allow_leading_transcript_skip,
         )
         if args.output_tsv:
             write_aligned_tsv(args.index_name or args.srt.stem, aligned, args.output_tsv)
+        if args.output_speaker_map:
+            write_speaker_map(aligned, args.output_speaker_map)
     elif args.command == "align-map":
         align_mapping_table(
             args.mapping,

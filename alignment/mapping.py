@@ -5,10 +5,19 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-from .align import align_srt_file, write_aligned_tsv
+from .align import align_srt_file, write_aligned_tsv, write_speaker_map
 from .io import write_tsv
 
-MAPPING_SUMMARY_COLUMNS = ["name", "srt", "manual", "aligned_srt", "aligned_tsv", "segments", "status"]
+MAPPING_SUMMARY_COLUMNS = [
+    "name",
+    "srt",
+    "manual",
+    "aligned_srt",
+    "aligned_tsv",
+    "speaker_map",
+    "segments",
+    "status",
+]
 
 
 def read_mapping_rows(path: Path | str) -> list[dict[str, str]]:
@@ -24,6 +33,16 @@ def chunk_stem(row: dict[str, str]) -> str:
     return Path(row.get("name", "").strip()).stem
 
 
+def row_speaker_hint(row: dict[str, str]) -> str:
+    """Return an optional mapping-provided actual speaker tag."""
+    return (
+        row.get("transcript_speaker", "")
+        or row.get("speaker", "")
+        or row.get("speaker_hint", "")
+        or row.get("respondent", "")
+    ).strip().strip("[]:")
+
+
 def align_mapping_table(
     mapping_path: Path | str,
     srt_dir: Path | str,
@@ -31,6 +50,7 @@ def align_mapping_table(
     *,
     use_transcript_speakers: bool = False,
     infer_missing_speakers: bool = False,
+    allow_leading_transcript_skip: bool = True,
 ) -> list[dict[str, str]]:
     """Align every mapped transcript row to the SRT with the same chunk stem."""
     srt_root = Path(srt_dir)
@@ -38,6 +58,7 @@ def align_mapping_table(
     manual_dir = output_root / "manual"
     aligned_dir = output_root / "aligned"
     table_dir = output_root / "tables"
+    speaker_map_dir = output_root / "speaker_maps"
     summary: list[dict[str, str]] = []
 
     for row in read_mapping_rows(mapping_path):
@@ -50,6 +71,7 @@ def align_mapping_table(
         manual_path = manual_dir / f"{stem}.manual.txt"
         aligned_srt_path = aligned_dir / f"{stem}.aligned.srt"
         aligned_tsv_path = table_dir / f"{stem}.aligned.tsv"
+        speaker_map_path = speaker_map_dir / f"{stem}.speaker_map.csv"
         if not srt_path.exists():
             summary.append(
                 {
@@ -58,6 +80,7 @@ def align_mapping_table(
                     "manual": "",
                     "aligned_srt": "",
                     "aligned_tsv": "",
+                    "speaker_map": "",
                     "segments": "0",
                     "status": "missing_srt",
                 }
@@ -72,8 +95,11 @@ def align_mapping_table(
             aligned_srt_path,
             use_transcript_speakers=use_transcript_speakers,
             infer_missing_speakers=infer_missing_speakers,
+            fallback_speaker=row_speaker_hint(row),
+            allow_leading_transcript_skip=allow_leading_transcript_skip,
         )
         write_aligned_tsv(stem, aligned, aligned_tsv_path)
+        write_speaker_map(aligned, speaker_map_path)
         summary.append(
             {
                 "name": stem,
@@ -81,6 +107,7 @@ def align_mapping_table(
                 "manual": str(manual_path),
                 "aligned_srt": str(aligned_srt_path),
                 "aligned_tsv": str(aligned_tsv_path),
+                "speaker_map": str(speaker_map_path),
                 "segments": str(len(aligned)),
                 "status": "aligned",
             }

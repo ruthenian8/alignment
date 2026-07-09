@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 
 from alignment.cli import main
@@ -41,7 +42,48 @@ def test_align_map_reads_csv_and_writes_chunk_outputs(tmp_path: Path) -> None:
 
     summary = read_tsv(output_dir / "summary.tsv")
     assert [(row["name"], row["status"]) for row in summary] == [("chunk001", "aligned")]
+    assert Path(summary[0]["speaker_map"]).name == "chunk001.speaker_map.csv"
     aligned = parse_srt((output_dir / "aligned" / "chunk001.aligned.srt").read_text(encoding="utf-8"))
     assert [segment.speaker for segment in aligned] == ["[АБ]:", "[АБ]:"]
     assert "до\\брый день" in (output_dir / "manual" / "chunk001.manual.txt").read_text(encoding="utf-8")
     assert read_tsv(output_dir / "tables" / "chunk001.aligned.tsv")[0]["index_name"] == "chunk001"
+    with (output_dir / "speaker_maps" / "chunk001.speaker_map.csv").open(encoding="utf-8") as file:
+        speaker_rows = list(csv.DictReader(file))
+    assert [row["whisperx_speaker"] for row in speaker_rows] == ["[SPEAKER_00]:", "[SPEAKER_00]:"]
+    assert [row["transcript_speaker"] for row in speaker_rows] == ["[АБ]:", "[АБ]:"]
+
+
+def test_align_map_uses_speaker_hint_only_for_rows_without_explicit_speakers(tmp_path: Path) -> None:
+    mapping = tmp_path / "mapping.csv"
+    srt_dir = tmp_path / "srt"
+    output_dir = tmp_path / "out"
+    srt_dir.mkdir()
+    mapping.write_text(
+        'name,transcript,speaker_hint\nchunk001.wav,"[Что это?] Ручной ответ.",ААК\n',
+        encoding="utf-8",
+    )
+    (srt_dir / "chunk001.srt").write_text(
+        "1\n"
+        "00:00:00,000 --> 00:00:01,000\n"
+        "[SPEAKER_00]: что это\n\n"
+        "2\n"
+        "00:00:01,000 --> 00:00:02,000\n"
+        "[SPEAKER_01]: ручной ответ\n",
+        encoding="utf-8",
+    )
+
+    main(
+        [
+            "align-map",
+            str(mapping),
+            str(srt_dir),
+            str(output_dir),
+            "--use-transcript-speakers",
+            "--infer-missing-speakers",
+        ]
+    )
+
+    with (output_dir / "speaker_maps" / "chunk001.speaker_map.csv").open(encoding="utf-8") as file:
+        speaker_rows = list(csv.DictReader(file))
+    assert [row["transcript_speaker"] for row in speaker_rows] == ["[UNK]:", "[ААК]:"]
+    assert [row["speaker_source"] for row in speaker_rows] == ["collector_bracket", "speaker_hint"]

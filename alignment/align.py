@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
+import csv
 import re
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from .io import ALIGNED_COLUMNS, write_tsv
+from .annotations import (
+    BRACKET_RE,
+    is_collector_utterance,
+    should_tokenize_bracket_text,
+    speaker_tag_from_text,
+    strip_alignment_notes,
+)
+from .io import ALIGNED_COLUMNS, SPEAKER_MAP_COLUMNS, write_tsv
 from .reorder import normalize_for_match
 from .srt import SrtSegment, format_srt, parse_srt
 
-BRACKET_RE = re.compile(r"\[([^\]]+)\]")
 SPEAKER_MARKER_RE = re.compile(r"\[([^\]]{1,300}):\]")
 SPEAKER_CODE_RE = re.compile(r"[A-ZА-ЯЁ]{1,6}|\?{3}")
 UNKNOWN_SPEAKER = "UNK"
@@ -31,12 +38,15 @@ class AlignedSegment:
     """One SRT segment aligned to a manual transcript span."""
 
     srt: SrtSegment
+    original_speaker: str
     transcript_text: str
     normalized_text: str
     matched: bool
     score: float
     transcript_start: int = -1
     transcript_end: int = -1
+    transcript_speaker: str = ""
+    speaker_source: str = ""
 
 
 @dataclass(frozen=True)
@@ -78,15 +88,12 @@ def token_similarity(left: list[str], right: list[str]) -> float:
 
 def is_unknown_speaker_bracket(marker_text: str) -> bool:
     """Return true for bracketed interviewer/collector text that should be [UNK]."""
-    text = marker_text.strip()
-    if speaker_tag_from_speaker_text(text.rstrip(":")):
-        return False
-    return text.startswith(("Соб.", "Соб.:")) or "?" in text.replace("???", "")
+    return is_collector_utterance(marker_text)
 
 
 def should_tokenize_bracket(marker_text: str) -> bool:
     """Return true for bracketed text whose words should participate in matching."""
-    return is_unknown_speaker_bracket(marker_text)
+    return should_tokenize_bracket_text(marker_text)
 
 
 def is_short_speaker_action(text: str) -> bool:
@@ -111,15 +118,7 @@ def speaker_tag_from_editorial_note(text: str) -> str:
 
 def speaker_tag_from_speaker_text(text: str) -> str:
     """Extract initials from a text that is expected to contain only speaker tags."""
-    parts = [part.strip() for part in re.split(r"\s*,\s*", text.strip())]
-    if not parts:
-        return ""
-    tags = []
-    for part in parts:
-        if not SPEAKER_CODE_RE.fullmatch(part):
-            return ""
-        tags.append(part)
-    return ", ".join(tags)
+    return speaker_tag_from_text(text)
 
 
 def speaker_tag_from_marker(marker_text: str) -> str:
@@ -176,6 +175,15 @@ def find_speaker_tag_before_span(transcript: str, start: int) -> str:
     return candidates[-1] if candidates else ""
 
 
+def leading_speaker_tag(transcript: str) -> str:
+    """Return an initial transcript speaker marker when one is present."""
+    match = SPEAKER_MARKER_RE.match(transcript.strip())
+    if not match:
+        return ""
+    tag = speaker_tag_from_marker(match.group(1))
+    return "" if tag == UNKNOWN_SPEAKER else tag
+
+
 def unknown_speaker_tag_at_span(transcript: str, start: int, end: int) -> str:
     """Return [UNK] when an aligned span is contained by an unknown-speaker bracket."""
     if start < 0 or end < start:
@@ -206,16 +214,7 @@ def remove_speaker_markers(text: str) -> str:
 
 def remove_alignment_notes(text: str) -> str:
     """Remove bracketed editorial notes that should not drive alignment."""
-
-    def replace_note(match: re.Match[str]) -> str:
-        marker = match.group(1)
-        if is_unknown_speaker_bracket(marker):
-            return match.group(0)
-        tag = speaker_tag_from_marker(marker)
-        return format_transcript_speaker_marker(tag) if tag else ""
-
-    text = re.sub(r"\s+", " ", BRACKET_RE.sub(replace_note, text)).strip()
-    return re.sub(r"\s+([,.;:!?])", r"\1", text)
+    return strip_alignment_notes(text, speaker_tag_from_marker)
 
 
 def speaker_blocks_from_transcript(transcript: str) -> list[SpeakerBlock]:
@@ -274,6 +273,7 @@ def align_segments(
     max_span: int = 25,
     skip_penalty: float = 0.8,
     similarity_threshold: float = 0.3,
+    allow_leading_transcript_skip: bool = False,
 ) -> list[AlignedSegment]:
     """Align SRT segments to contiguous manual transcript spans monotonically."""
     tokens = tokenize_transcript(transcript)
@@ -282,7 +282,11 @@ def align_segments(
     srt_tokens = [normalize_for_match(segment.text).split() for segment in srt_segments]
     dp = [[float("inf")] * (m + 1) for _ in range(n + 1)]
     prev: list[list[tuple[int, bool, float] | None]] = [[None] * (m + 1) for _ in range(n + 1)]
-    dp[0][0] = 0.0
+    if allow_leading_transcript_skip:
+        for j in range(m + 1):
+            dp[0][j] = 0.0
+    else:
+        dp[0][0] = 0.0
     for i in range(1, n + 1):
         for j in range(m + 1):
             if dp[i - 1][j] + skip_penalty < dp[i][j]:
@@ -328,6 +332,7 @@ def align_segments(
         aligned.append(
             AlignedSegment(
                 segment,
+                segment.speaker,
                 span_text,
                 normalized,
                 matched and bool(span_text),
@@ -339,8 +344,30 @@ def align_segments(
     return aligned
 
 
+def aligned_speaker_tag(
+    item: AlignedSegment, transcript: str, speaker_blocks: list[SpeakerBlock]
+) -> tuple[str, str]:
+    """Infer the transcript speaker tag and source for one aligned segment."""
+    if not item.matched or item.transcript_end < 0:
+        return "", ""
+    tag = unknown_speaker_tag_at_span(transcript, item.transcript_start, item.transcript_end)
+    if tag == UNKNOWN_SPEAKER:
+        return tag, "collector_bracket"
+    tag = find_speaker_tag_before_span(transcript, item.transcript_start)
+    if tag:
+        return tag, "preceding_marker"
+    tag = speaker_tag_from_blocks(speaker_blocks, item.transcript_start)
+    if tag:
+        return tag, "block_footer"
+    return "", ""
+
+
 def apply_transcript_speakers(
-    aligned: list[AlignedSegment], transcript: str, *, infer_missing: bool = False
+    aligned: list[AlignedSegment],
+    transcript: str,
+    *,
+    infer_missing: bool = False,
+    fallback_speaker: str = "",
 ) -> list[AlignedSegment]:
     """Update SRT speaker prefixes from bracketed speaker tags in the transcript.
 
@@ -349,22 +376,18 @@ def apply_transcript_speakers(
     """
     output: list[AlignedSegment] = []
     speaker_blocks = speaker_blocks_from_transcript(transcript)
-    last_tag = ""
+    last_tag = leading_speaker_tag(transcript) if infer_missing else ""
     for item in aligned:
-        tag = ""
-        is_unknown_span = False
-        if item.matched and item.transcript_end >= 0:
-            tag = unknown_speaker_tag_at_span(transcript, item.transcript_start, item.transcript_end)
-            is_unknown_span = tag == UNKNOWN_SPEAKER
-            if not tag:
-                tag = find_speaker_tag_before_span(transcript, item.transcript_start)
-            if not tag:
-                tag = speaker_tag_from_blocks(speaker_blocks, item.transcript_start)
+        tag, source = aligned_speaker_tag(item, transcript, speaker_blocks)
         if tag:
-            if not is_unknown_span:
+            if tag != UNKNOWN_SPEAKER:
                 last_tag = tag
         elif infer_missing:
             tag = last_tag
+            source = "carried_forward_prev" if tag else ""
+        if not tag and fallback_speaker and item.matched:
+            tag = fallback_speaker
+            source = "speaker_hint"
         if tag:
             item = replace(
                 item,
@@ -376,6 +399,8 @@ def apply_transcript_speakers(
                     item.srt.text,
                 ),
                 transcript_text=remove_speaker_markers(item.transcript_text),
+                transcript_speaker=format_speaker_tag(tag),
+                speaker_source=source,
             )
         output.append(item)
     return output
@@ -409,6 +434,23 @@ def aligned_to_rows(index_name: str, aligned: list[AlignedSegment]) -> list[dict
     ]
 
 
+def aligned_to_speaker_map_rows(aligned: list[AlignedSegment]) -> list[dict[str, object]]:
+    """Convert aligned segments to generic speaker-map rows."""
+    return [
+        {
+            "srt_index": item.srt.index,
+            "start": item.srt.start,
+            "end": item.srt.end,
+            "whisperx_speaker": item.original_speaker,
+            "transcript_speaker": item.transcript_speaker,
+            "speaker_source": item.speaker_source,
+            "matched": item.matched,
+            "score": f"{item.score:.3f}",
+        }
+        for item in aligned
+    ]
+
+
 def align_srt_file(
     srt_path: Path | str,
     transcript_text: str,
@@ -416,16 +458,25 @@ def align_srt_file(
     *,
     use_transcript_speakers: bool = False,
     infer_missing_speakers: bool = False,
+    fallback_speaker: str = "",
+    allow_leading_transcript_skip: bool = False,
 ) -> list[AlignedSegment]:
     """Align one SRT file to transcript text and optionally write merged SRT."""
     alignment_transcript = (
         transcript_with_block_speaker_markers(transcript_text) if use_transcript_speakers else transcript_text
     )
     alignment_transcript = remove_alignment_notes(alignment_transcript)
-    aligned = align_segments(parse_srt(Path(srt_path).read_text(encoding="utf-8-sig")), alignment_transcript)
+    aligned = align_segments(
+        parse_srt(Path(srt_path).read_text(encoding="utf-8-sig")),
+        alignment_transcript,
+        allow_leading_transcript_skip=allow_leading_transcript_skip,
+    )
     if use_transcript_speakers:
         aligned = apply_transcript_speakers(
-            aligned, alignment_transcript, infer_missing=infer_missing_speakers
+            aligned,
+            alignment_transcript,
+            infer_missing=infer_missing_speakers,
+            fallback_speaker=fallback_speaker,
         )
     if output_srt is not None:
         Path(output_srt).parent.mkdir(parents=True, exist_ok=True)
@@ -436,3 +487,13 @@ def align_srt_file(
 def write_aligned_tsv(index_name: str, aligned: list[AlignedSegment], output_path: Path | str) -> None:
     """Write aligned segments to canonical TSV."""
     write_tsv(output_path, aligned_to_rows(index_name, aligned), ALIGNED_COLUMNS)
+
+
+def write_speaker_map(aligned: list[AlignedSegment], output_path: Path | str) -> None:
+    """Write generic alignment-time speaker provenance rows."""
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open("w", encoding="utf-8", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=SPEAKER_MAP_COLUMNS)
+        writer.writeheader()
+        writer.writerows(aligned_to_speaker_map_rows(aligned))

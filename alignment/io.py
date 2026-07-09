@@ -20,6 +20,16 @@ ALIGNED_COLUMNS = [
     "matched",
     "score",
 ]
+SPEAKER_MAP_COLUMNS = [
+    "srt_index",
+    "start",
+    "end",
+    "whisperx_speaker",
+    "transcript_speaker",
+    "speaker_source",
+    "matched",
+    "score",
+]
 MANIFEST_COLUMNS = [
     "clip_id",
     "audio_path",
