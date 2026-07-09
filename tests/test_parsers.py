@@ -22,6 +22,12 @@ def test_plaintext_index_parses_untranscribed_and_continuation_linking():
     assert rows[0]["name"] == "sampleNo0.wav"
 
 
+def test_plaintext_index_accepts_missing_milliseconds():
+    rows = parse_index_text("00:00:00 First\n00:00:02,500 Second", audio_stem="sample")
+
+    assert [row["start"] for row in rows] == ["00:00:00.000", "00:00:02.500"]
+
+
 def test_real_pez_index_fixture_parses_rows():
     rows = parse_index_text(
         Path("data/index_plaintext/pez_001.txt").read_text(encoding="utf-8-sig"), audio_stem="pez_001"
@@ -57,5 +63,100 @@ XXIIа-19
 """.strip()
     rows = parse_transcript_text(text)
     assert rows[0]["transcript"] == "[ААК:] [Вопрос?] Так, часо\\вня."
+    assert rows[0]["max_speakers"] == 3
+    assert rows[0]["min_speakers"] == 1
+
+
+def test_transcript_parser_reads_exported_table_rows():
+    text = """
+Текст
+Год
+Село
+Информант
+Собиратель 1
+Собиратель 2
+Программа
+Вопросы
+[Вопрос?] Да_, молоды\\е.
+2011
+Яреньга
+АГА
+АБМ
+ПН
+XVII
+10 доп.
+""".strip()
+
+    rows = parse_transcript_text(text)
+
+    assert rows[0]["transcript"] == "[АГА:] [Вопрос?] Да_, молоды\\е."
+    assert rows[0]["max_speakers"] == 3
+    assert rows[0]["min_speakers"] == 1
+
+
+def test_transcript_parser_preserves_blank_exported_table_cells():
+    text = "\n".join(
+        [
+            "Текст",
+            "Год",
+            "Село",
+            "Информант",
+            "Собиратель 1",
+            "Собиратель 2",
+            "Программа",
+            "Вопросы",
+            "[Вопрос?] Да_, молоды\\е.",
+            "2011",
+            "Яреньга",
+            "АГА",
+            "АБМ",
+            "",
+            "XVII",
+            "10 доп.",
+            "Вторая карточка.",
+            "2011",
+            "Яреньга",
+            "ПН",
+            "АБМ",
+            "",
+            "XVII",
+            "11 доп.",
+        ]
+    )
+
+    rows = parse_transcript_text(text)
+
+    assert [row["transcript"] for row in rows] == [
+        "[АГА:] [Вопрос?] Да_, молоды\\е.",
+        "[ПН:] Вторая карточка.",
+    ]
+    assert [row["max_speakers"] for row in rows] == [2, 2]
+    assert [row["min_speakers"] for row in rows] == [1, 1]
+
+
+def test_transcript_parser_reads_numbered_table_rows_with_multiline_text():
+    text = """
+№
+Текст карточки
+Село
+Год
+№ программы
+№№ вопросов
+Информант
+Собиратели
+1
+[Церковь здесь раньше работала?]
+[МАН:] Рабо\\тала це\\ркофь.
+Лопшеньга
+2011
+XXIIа
+10е
+МАН
+ВК; ПН
+""".strip()
+
+    rows = parse_transcript_text(text)
+
+    assert rows[0]["transcript"] == "[МАН:] [Церковь здесь раньше работала?] [МАН:] Рабо\\тала це\\ркофь."
     assert rows[0]["max_speakers"] == 3
     assert rows[0]["min_speakers"] == 1

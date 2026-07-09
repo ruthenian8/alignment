@@ -10,7 +10,7 @@ from xml.etree import ElementTree
 from .io import INDEX_COLUMNS, write_tsv
 from .srt import normalize_timestamp
 
-TIME_RE = re.compile(r"\d{1,2}:\d{2}:\d{2}[,.]\d{3}")
+TIME_RE = re.compile(r"\d{1,2}:\d{2}:\d{2}(?:[,.]\d{3})?")
 START_RE = re.compile(rf"^\s*({TIME_RE.pattern})(?:\s*[-–]\s*|\s+)?(.*)")
 CONT_RE = re.compile(r"продолж|окончание|начало\s+см", re.IGNORECASE)
 INDEX_PREFIX_RE = re.compile(r"^\s*\d{1,2}:\d{2}:\d{2}[,.]\d{3}\s*[-–—]\s*")
@@ -38,6 +38,13 @@ def read_index_text(path: Path | str) -> str:
     return "\n".join(paragraphs)
 
 
+def normalize_index_timestamp(timestamp: str, *, decimal: str = ".") -> str:
+    """Normalize a coarse index timestamp, allowing missing milliseconds."""
+    if "." not in timestamp and "," not in timestamp:
+        timestamp = f"{timestamp},000"
+    return normalize_timestamp(timestamp, decimal=decimal)
+
+
 def parse_index_text(text: str, *, audio_stem: str = "audio", suffix: str = ".wav") -> list[dict[str, str]]:
     """Parse a coarse index into canonical index rows."""
     rows: list[dict[str, str]] = []
@@ -48,7 +55,7 @@ def parse_index_text(text: str, *, audio_stem: str = "audio", suffix: str = ".wa
             continue
         match = START_RE.match(line)
         if match:
-            start = normalize_timestamp(match.group(1), decimal=".")
+            start = normalize_index_timestamp(match.group(1), decimal=".")
             body = f"{match.group(1)} - {match.group(2).strip()}"
             row = {
                 "start": start,
@@ -60,7 +67,7 @@ def parse_index_text(text: str, *, audio_stem: str = "audio", suffix: str = ".wa
             }
             times = TIME_RE.findall(line)
             if len(times) > 1 and CONT_RE.search(line):
-                row["cont"] = normalize_timestamp(times[-1], decimal=".")
+                row["cont"] = normalize_index_timestamp(times[-1], decimal=".")
             rows.append(row)
             current = row
             continue
