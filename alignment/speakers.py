@@ -9,19 +9,21 @@ from pathlib import Path
 
 from .align import (
     UNKNOWN_SPEAKER,
+    find_non_note_speaker_tag_before_span,
     find_speaker_tag,
-    find_speaker_tag_before_span,
     format_speaker_tag,
     is_unknown_speaker_bracket,
     remove_alignment_notes,
     speaker_blocks_from_transcript,
+    speaker_note_tag_at_span_start,
+    speaker_note_tag_before_span,
     speaker_tag_from_blocks,
     speaker_tag_from_marker,
     tokenize_transcript,
     transcript_with_block_speaker_markers,
     unknown_speaker_tag_at_span,
 )
-from .io import read_tsv
+from .io import parse_bool, read_tsv
 
 CLIP_RE = re.compile(r"^(?P<index>\d{3})_(?P<speaker>.+)_(?P<timestamp>\d{2}-\d{2}-\d{2}-\d{3})$")
 LEADING_CONTEXT_SPEAKER_RE = re.compile(
@@ -146,9 +148,14 @@ def explicit_row_speaker(
     if tag:
         return tag, source, cursor
 
-    tag = find_speaker_tag_before_span(transcript, start_char)
+    tag = find_non_note_speaker_tag_before_span(transcript, start_char)
     if tag:
         return tag, "preceding_marker", cursor
+    tag = speaker_note_tag_at_span_start(transcript, start_char) or speaker_note_tag_before_span(
+        transcript, start_char
+    )
+    if tag:
+        return tag, "speaker_note", cursor
     tag = speaker_tag_from_blocks(speaker_blocks, start_char)
     if tag:
         return tag, "block_footer", cursor
@@ -321,14 +328,19 @@ def summarize_speaker_maps(
     """Summarize inferred speaker map coverage into CSV files."""
     source_counts: Counter[str] = Counter()
     speaker_counts: Counter[str] = Counter()
-    total = missing = unk = same_as_whisperx = 0
+    total = missing = matched_blank = unmatched_blank = unk = same_as_whisperx = 0
     for path in cut_root.glob(f"*/*/{output_name}"):
         with path.open(encoding="utf-8") as handle:
             for row in csv.DictReader(handle):
                 total += 1
                 speaker = row["transcript_speaker"]
+                matched = parse_bool(row.get("aligned_matched", row.get("matched", "")))
                 if not speaker:
                     missing += 1
+                    if matched:
+                        matched_blank += 1
+                    else:
+                        unmatched_blank += 1
                 if speaker == "[UNK]:":
                     unk += 1
                 if speaker and speaker == row["whisperx_speaker"]:
@@ -341,6 +353,8 @@ def summarize_speaker_maps(
         "rows": total,
         "inferred_rows": total - missing,
         "blank_rows": missing,
+        "matched_blank_rows": matched_blank,
+        "unmatched_blank_rows": unmatched_blank,
         "unknown_rows": unk,
         "same_as_whisperx_rows": same_as_whisperx,
     }

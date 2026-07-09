@@ -92,11 +92,15 @@ def test_summarize_speaker_maps_uses_requested_output_name(tmp_path):
     (map_dir / "custom_speakers.csv").write_text(
         "audio_file,text_file,text_original_file,srt_index,timestamp,whisperx_speaker,"
         "transcript_speaker,speaker_source,aligned_matched,alignment_score\n"
-        "001.wav,001.txt,001_orig.txt,1,00-00-00-000,[SPEAKER_00]:,[ААК]:,speaker_hint,True,1.000\n",
+        "001.wav,001.txt,001_orig.txt,1,00-00-00-000,[SPEAKER_00]:,[ААК]:,speaker_hint,True,1.000\n"
+        "002.wav,002.txt,002_orig.txt,2,00-00-01-000,[SPEAKER_00]:,,unmatched,True,0.800\n"
+        "003.wav,003.txt,003_orig.txt,3,00-00-02-000,[SPEAKER_00]:,,unmatched,False,0.000\n",
         encoding="utf-8",
     )
 
     metrics = summarize_speaker_maps(tmp_path / "cut", tmp_path / "summary", "custom_speakers.csv")
 
-    assert metrics["rows"] == 1
+    assert metrics["rows"] == 3
     assert metrics["inferred_rows"] == 1
+    assert metrics["matched_blank_rows"] == 1
+    assert metrics["unmatched_blank_rows"] == 1

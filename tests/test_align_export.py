@@ -182,6 +182,42 @@ def test_declarative_collector_bracket_replaces_srt_speaker_with_unknown():
     assert updated[0].srt.speaker == "[UNK]:"
 
 
+def test_common_speaker_note_replaces_srt_speaker():
+    srt = parse_srt("1\n00:00:00,000 --> 00:00:01,000\n[SPEAKER_00]: ручной ответ\n")
+    transcript = "[ФМП спрашивает:] Ручно\\й отве\\т."
+    aligned = align_segments(srt, transcript, max_span=5, similarity_threshold=0.2)
+    updated = apply_transcript_speakers(aligned, transcript)
+    assert updated[0].srt.speaker == "[ФМП]:"
+    assert updated[0].speaker_source == "speaker_note"
+
+
+def test_common_speaker_note_after_verb_replaces_srt_speaker():
+    srt = parse_srt("1\n00:00:00,000 --> 00:00:01,000\n[SPEAKER_00]: ручной ответ\n")
+    transcript = "[Сверху говорит громко Д:] Ручно\\й отве\\т."
+    aligned = align_segments(srt, transcript, max_span=5, similarity_threshold=0.2)
+    updated = apply_transcript_speakers(aligned, transcript)
+    assert updated[0].srt.speaker == "[Д]:"
+    assert updated[0].speaker_source == "speaker_note"
+
+
+def test_long_speaker_commentary_does_not_assign_speaker():
+    srt = parse_srt("1\n00:00:00,000 --> 00:00:01,000\n[SPEAKER_00]: ручной ответ\n")
+    transcript = "[Собиратель спрашивает у ЛД имя перед началом записи.] Ручно\\й отве\\т."
+    aligned = align_segments(srt, transcript, max_span=5, similarity_threshold=0.2)
+    updated = apply_transcript_speakers(aligned, transcript)
+    assert updated[0].srt.speaker == "[SPEAKER_00]:"
+    assert updated[0].speaker_source == ""
+
+
+def test_explicit_marker_precedes_common_speaker_note():
+    srt = parse_srt("1\n00:00:00,000 --> 00:00:01,000\n[SPEAKER_00]: ручной ответ\n")
+    transcript = "[АБ:] [ФМП спрашивает:] Ручно\\й отве\\т."
+    aligned = align_segments(srt, transcript, max_span=5, similarity_threshold=0.2)
+    updated = apply_transcript_speakers(aligned, transcript)
+    assert updated[0].srt.speaker == "[АБ]:"
+    assert updated[0].speaker_source == "preceding_marker"
+
+
 def test_unknown_speaker_does_not_carry_forward_when_inferring_missing_speakers():
     srt = parse_srt(
         """

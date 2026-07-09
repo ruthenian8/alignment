@@ -9,6 +9,8 @@ from pathlib import Path
 
 from .annotations import (
     BRACKET_RE,
+    BracketKind,
+    classify_bracket_text,
     is_collector_utterance,
     should_tokenize_bracket_text,
     speaker_tag_from_text,
@@ -116,6 +118,28 @@ def speaker_tag_from_editorial_note(text: str) -> str:
     return ""
 
 
+def speaker_tag_from_common_note(text: str) -> str:
+    """Extract a speaker from common short speaker notes without chasing rare comments."""
+    stripped = text.strip()
+    if classify_bracket_text(stripped) != BracketKind.SPEAKER_NOTE:
+        return ""
+    if len(stripped.split()) > 8:
+        return ""
+    code = SPEAKER_CODE_RE.pattern
+    match = re.search(
+        rf"(?<!\w)({code})\s+(?:говорит|спрашивает|отвечает|подхватывает)\b",
+        stripped,
+    )
+    if match:
+        return match.group(1)
+    match = re.search(r"\bговорит\b((?:\s+\S+){0,4})", stripped, flags=re.IGNORECASE)
+    if match:
+        tags = re.findall(code, match.group(1).rstrip(":"))
+        if tags:
+            return tags[-1]
+    return ""
+
+
 def speaker_tag_from_speaker_text(text: str) -> str:
     """Extract initials from a text that is expected to contain only speaker tags."""
     return speaker_tag_from_text(text)
@@ -131,10 +155,41 @@ def speaker_tag_from_marker(marker_text: str) -> str:
         return UNKNOWN_SPEAKER
     if "???" in text:
         return "???"
+    tag = speaker_tag_from_common_note(text)
+    if tag:
+        return tag
     match = re.match(r"([A-ZА-ЯЁ]{1,6})(?=\s|,|$)", text) if is_short_speaker_action(text) else None
     if match:
         return match.group(1)
     return speaker_tag_from_editorial_note(text)
+
+
+def speaker_note_tag_before_span(transcript: str, start: int) -> str:
+    """Find a common speaker note immediately before a transcript span."""
+    if start < 0:
+        return ""
+    search_start = max(0, start - 220)
+    prefix = transcript[search_start:start]
+    matches = list(BRACKET_RE.finditer(prefix))
+    if not matches:
+        return ""
+    match = matches[-1]
+    if prefix[match.end() :].strip():
+        return ""
+    return speaker_tag_from_common_note(match.group(1))
+
+
+def speaker_note_tag_at_span_start(transcript: str, start: int) -> str:
+    """Find a common speaker note at the beginning of an aligned transcript span."""
+    if start < 0:
+        return ""
+    match = BRACKET_RE.match(transcript[start:])
+    if not match:
+        return ""
+    tag = speaker_tag_from_common_note(match.group(1))
+    if not tag:
+        return ""
+    return tag
 
 
 def speaker_tag_from_line(line: str) -> str:
@@ -170,6 +225,26 @@ def find_speaker_tag_before_span(transcript: str, start: int) -> str:
         absolute_end = search_start + match.end()
         if absolute_start <= start and (absolute_end <= start or absolute_start == start):
             tag = speaker_tag_from_marker(match.group(1))
+            if tag:
+                candidates.append(tag)
+    return candidates[-1] if candidates else ""
+
+
+def find_non_note_speaker_tag_before_span(transcript: str, start: int) -> str:
+    """Find the closest speaker marker before a span, excluding weak note markers."""
+    if start < 0:
+        return ""
+    search_start = max(0, start - 300)
+    search_end = min(len(transcript), start + 300)
+    candidates = []
+    for match in SPEAKER_MARKER_RE.finditer(transcript[search_start:search_end]):
+        absolute_start = search_start + match.start()
+        absolute_end = search_start + match.end()
+        if absolute_start <= start and (absolute_end <= start or absolute_start == start):
+            marker = match.group(1)
+            if speaker_tag_from_common_note(marker):
+                continue
+            tag = speaker_tag_from_marker(marker)
             if tag:
                 candidates.append(tag)
     return candidates[-1] if candidates else ""
@@ -353,9 +428,15 @@ def aligned_speaker_tag(
     tag = unknown_speaker_tag_at_span(transcript, item.transcript_start, item.transcript_end)
     if tag == UNKNOWN_SPEAKER:
         return tag, "collector_bracket"
-    tag = find_speaker_tag_before_span(transcript, item.transcript_start)
+    tag = find_non_note_speaker_tag_before_span(transcript, item.transcript_start)
     if tag:
         return tag, "preceding_marker"
+    tag = speaker_note_tag_at_span_start(transcript, item.transcript_start)
+    if tag:
+        return tag, "speaker_note"
+    tag = speaker_note_tag_before_span(transcript, item.transcript_start)
+    if tag:
+        return tag, "speaker_note"
     tag = speaker_tag_from_blocks(speaker_blocks, item.transcript_start)
     if tag:
         return tag, "block_footer"
