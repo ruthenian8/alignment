@@ -52,7 +52,9 @@ def _assign_payloads(
             for column in ("transcript", "max_speakers", "min_speakers"):
                 if column in row:
                     row[column] = ""
-    for target, payload in zip(targets, payloads, strict=False):
+    for index in range(min(len(targets), len(payloads))):
+        target = targets[index]
+        payload = payloads[index]
         for column, value in payload.items():
             if value or column in output[target]:
                 output[target][column] = value
@@ -76,8 +78,8 @@ def reorder_rows(rows: list[dict[str, str]], *, max_shift: int = 3) -> list[dict
     for shift in range(0, max_test_shift + 1):
         shifted_payloads = payloads[shift:] + payloads[:shift]
         scores = [
-            similarity(rows[target]["text"], payload["transcript"])
-            for target, payload in zip(targets, shifted_payloads, strict=False)
+            similarity(rows[targets[index]]["text"], shifted_payloads[index]["transcript"])
+            for index in range(min(len(targets), len(shifted_payloads)))
         ]
         mean = sum(scores) / len(scores) if scores else 0.0
         if mean > best_score:

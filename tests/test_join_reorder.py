@@ -1,4 +1,4 @@
-from alignment.join import join_rows
+from alignment.join import is_meta_commentary_transcript, join_rows, transcript_rows_for_join
 from alignment.reorder import reorder_rows
 
 
@@ -41,6 +41,44 @@ def test_join_skips_continuation_fragments_when_enough_primary_rows_exist():
     assert rows[0]["transcript"] == "first"
     assert rows[1].get("transcript", "") == ""
     assert rows[2]["transcript"] == "second"
+
+
+def test_join_skips_bracket_only_meta_commentary_before_assignment():
+    index = [
+        {"start": "00:00:00.000", "trans": "True", "cont": "", "prev": "", "text": "alpha", "name": "a.wav"},
+        {"start": "00:00:01.000", "trans": "True", "cont": "", "prev": "", "text": "beta", "name": "b.wav"},
+    ]
+    transcripts = [
+        {"transcript": "first", "max_speakers": "2", "min_speakers": "1"},
+        {
+            "transcript": "[РТИ:] [В Андричево устраивают праздник на день пограничника.]",
+            "max_speakers": "4",
+            "min_speakers": "1",
+        },
+        {"transcript": "second", "max_speakers": "1", "min_speakers": "1"},
+    ]
+
+    rows = join_rows(index, transcripts)
+
+    assert rows[0]["transcript"] == "first"
+    assert rows[1]["transcript"] == "second"
+
+
+def test_meta_commentary_filter_keeps_questions_and_mixed_answer_rows():
+    rows = [
+        {"transcript": "[РТИ:] [Какие три деревни?]"},
+        {"transcript": "[Соб.: Да.]"},
+        {"transcript": "[РТИ:] [Соб.: Анричево.] Андри\\чево, да."},
+        {"transcript": "[БГТ:] [Поет: Вот настанет осеннее утро.]"},
+        {"transcript": "[В бане нельзя держать зеркала. См. IVa-5 а, б]"},
+        {"transcript": "[Глафира помогла вернуть потерявшегося человека – см. XIII-9 а.]"},
+    ]
+
+    assert not is_meta_commentary_transcript(rows[0]["transcript"])
+    assert not is_meta_commentary_transcript(rows[1]["transcript"])
+    assert not is_meta_commentary_transcript(rows[2]["transcript"])
+    assert not is_meta_commentary_transcript(rows[3]["transcript"])
+    assert transcript_rows_for_join(rows) == rows[:4]
 
 
 def test_reorder_identity_and_one_row_shift():
