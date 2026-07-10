@@ -28,7 +28,7 @@ def test_leading_context_speaker_ignores_sentence_initial_one_letter_bracket():
 def test_bridge_fill_between_identical_speaker_anchors():
     rows = [
         {"srt_index": 1, "tag": "АБ", "source": "preceding_marker", "matched": "True", "score": "1.000"},
-        {"srt_index": 2, "tag": "", "source": "unmatched", "matched": "False", "score": "0.000"},
+        {"srt_index": 2, "tag": "", "source": "unmatched", "matched": "True", "score": "1.000"},
         {"srt_index": 3, "tag": "АБ", "source": "preceding_marker", "matched": "True", "score": "1.000"},
     ]
     filled = fill_speaker_gaps(rows, "")
@@ -66,7 +66,20 @@ def test_infer_table_speakers_prefers_non_whisperx_table_speakers():
     assert inferred[1]["speaker_source"] == "aligned_table"
 
 
-def test_infer_table_speakers_fills_trailing_same_chunk_rows_from_actual_speaker():
+def test_infer_table_speakers_uses_preceding_marker_for_following_matched_rows():
+    inferred = infer_table_speakers(
+        [
+            aligned_row(1, "добрый день"),
+            aligned_row(2, "красный дом"),
+        ],
+        "[АБ:] до\\брый день кра\\сный дом",
+    )
+    assert inferred[1]["transcript_speaker"] == "[АБ]:"
+    assert inferred[2]["transcript_speaker"] == "[АБ]:"
+    assert inferred[2]["speaker_source"] == "preceding_marker"
+
+
+def test_infer_table_speakers_does_not_fill_unmatched_rows():
     inferred = infer_table_speakers(
         [
             aligned_row(1, "добрый день"),
@@ -75,8 +88,8 @@ def test_infer_table_speakers_fills_trailing_same_chunk_rows_from_actual_speaker
         "[АБ:] до\\брый день",
     )
     assert inferred[1]["transcript_speaker"] == "[АБ]:"
-    assert inferred[2]["transcript_speaker"] == "[АБ]:"
-    assert inferred[2]["speaker_source"] == "carried_forward_prev"
+    assert inferred[2]["transcript_speaker"] == ""
+    assert inferred[2]["speaker_source"] == "unmatched"
 
 
 def test_raw_transcript_inventory_helpers_extract_filename_and_bracket_speakers(tmp_path):

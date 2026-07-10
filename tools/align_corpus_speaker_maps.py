@@ -13,7 +13,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from alignment.align import find_speaker_tag, speaker_tag_from_line  # noqa: E402
-from alignment.mapping import align_mapping_table  # noqa: E402
+from alignment.mapping import align_mapping_table, summary_quality_errors  # noqa: E402
 from alignment.reorder import normalize_for_match  # noqa: E402
 
 INDEXED_CORPORA = ("and", "pom", "uht")
@@ -71,6 +71,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--no-infer-missing-speakers",
         action="store_false",
         dest="infer_missing_speakers",
+    )
+    parser.add_argument(
+        "--require-diarized-matches",
+        action="store_true",
+        help="Fail when mapping rows are missing or matched segments lack transcript speakers.",
     )
     return parser.parse_args(argv)
 
@@ -308,6 +313,10 @@ def main(argv: list[str] | None = None) -> int:
             use_transcript_speakers=args.use_transcript_speakers,
             infer_missing_speakers=args.infer_missing_speakers,
         )
+        if args.require_diarized_matches:
+            errors = summary_quality_errors(summary)
+            if errors:
+                raise SystemExit(f"{name}: {'; '.join(errors)}")
         aligned += sum(row["status"] == "aligned" for row in summary)
         missing += sum(row["status"] != "aligned" for row in summary)
         print(f"{name}: {aligned} aligned so far, {missing} missing so far")

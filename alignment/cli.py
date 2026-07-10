@@ -10,7 +10,7 @@ from .embeddings import align_pairs_with_embeddings, extract_dialect_text, write
 from .export import export_aligned_srt_tree, export_srt_files
 from .index_parser import write_index_tsv
 from .join import join_tsv
-from .mapping import align_mapping_table
+from .mapping import align_mapping_table, summary_quality_errors
 from .reorder import reorder_tsv
 from .transcript_parser import write_transcript_tsv
 from .wer import compute_wer_from_tsv, format_wer_report
@@ -82,6 +82,11 @@ def build_parser() -> argparse.ArgumentParser:
     align_map.add_argument(
         "output_dir", type=Path, help="Directory for manual, aligned, and summary outputs."
     )
+    align_map.add_argument(
+        "--require-diarized-matches",
+        action="store_true",
+        help="Fail when any matched SRT segment has no transcript-derived speaker.",
+    )
     add_transcript_speaker_args(align_map)
 
     export = subparsers.add_parser("export-corpus", help="Cut audio clips and write text plus manifest.")
@@ -107,6 +112,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     export_aligned.add_argument("output_root", type=Path, help="Output cut_samples-style root.")
     export_aligned.add_argument("--manifest", type=Path, help="Optional output manifest TSV path.")
+    export_aligned.add_argument(
+        "--require-diarized-matches",
+        action="store_true",
+        help="Fail when a matched exported segment has no transcript-derived speaker.",
+    )
 
     align_embeddings = subparsers.add_parser(
         "align-embeddings",
@@ -169,17 +179,27 @@ def main(argv: list[str] | None = None) -> None:
         if args.output_speaker_map:
             write_speaker_map(aligned, args.output_speaker_map)
     elif args.command == "align-map":
-        align_mapping_table(
+        summary = align_mapping_table(
             args.mapping,
             args.srt_dir,
             args.output_dir,
             use_transcript_speakers=args.use_transcript_speakers,
             infer_missing_speakers=args.infer_missing_speakers,
         )
+        if args.require_diarized_matches:
+            errors = summary_quality_errors(summary)
+            if errors:
+                raise SystemExit("; ".join(errors))
     elif args.command == "export-corpus":
         export_srt_files(args.audio, args.original_srt, args.clean_srt, args.output_dir, args.manifest)
     elif args.command == "export-aligned-map":
-        export_aligned_srt_tree(args.aligned_root, args.audio_root, args.output_root, args.manifest)
+        export_aligned_srt_tree(
+            args.aligned_root,
+            args.audio_root,
+            args.output_root,
+            args.manifest,
+            require_diarized_matches=args.require_diarized_matches,
+        )
     elif args.command == "align-embeddings":
         extraction = extract_dialect_text(
             args.srt.read_text(encoding="utf-8-sig"),

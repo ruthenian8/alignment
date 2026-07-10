@@ -67,7 +67,9 @@ def main(argv: list[str] | None = None) -> int:
     print(
         "summary: "
         f"{metrics['inferred_rows']}/{metrics['rows']} inferred, "
-        f"{metrics['blank_rows']} blank, {metrics['unknown_rows']} unknown"
+        f"{metrics['blank_rows']} blank "
+        f"({metrics['matched_blank_rows']} matched, {metrics['unmatched_blank_rows']} unmatched), "
+        f"{metrics['unknown_rows']} unknown"
     )
     if inventory_rows:
         print(f"wrote raw transcript speaker inventory for {inventory_rows} text files")

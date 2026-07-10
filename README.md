@@ -25,10 +25,12 @@ alignment parse-transcript data/transcript_plaintext/pez_001.txt build/pez_001/t
 alignment join build/pez_001/index.tsv build/pez_001/transcript.tsv build/pez_001/joined.tsv
 alignment reorder build/pez_001/joined.tsv build/pez_001/reordered.tsv
 alignment align-srt data/whisper_srt/pez_001/pez_001No0.srt transcript.txt outputs/pez_001No0.srt --output-tsv outputs/pez_001No0.tsv
+alignment align-srt data/whisper_srt/pez_001/pez_001No0.srt transcript.txt outputs/pez_001No0.srt --use-transcript-speakers --infer-missing-speakers --output-speaker-map outputs/pez_001No0.speaker_map.csv
 alignment align-embeddings data/whisper_srt/pez_001/pez_001No0.srt transcript.txt outputs/pez_001No0_embs.tsv
 alignment wer outputs/pez_001No0.tsv --top 20
+alignment align-map mapping.csv srt_dir build/aligned --use-transcript-speakers --infer-missing-speakers --require-diarized-matches
 alignment export-corpus chunk.wav outputs/pez_001No0.srt outputs/pez_001No0.srt outputs/clips outputs/manifest.tsv
-alignment export-aligned-map build/align-map-wx-transcripts-srt-speakers hf-repo/cut_audio build/cut_samples --manifest build/cut_samples/manifest.tsv
+alignment export-aligned-map build/align-map-wx-transcripts-srt-speakers hf-repo/cut_audio build/cut_samples --manifest build/cut_samples/manifest.tsv --require-diarized-matches
 ```
 
 Write derived files under `build/` or `outputs/`. Keep files in `data/` as source fixtures.
@@ -65,6 +67,19 @@ Human-facing intermediate files are UTF-8 TSV.
 - `matched`: explicit `True`/`False` alignment status.
 - `score`: token-overlap alignment score.
 
+`speaker_map.csv` columns:
+
+- `srt_index`, `start`, `end`: aligned SRT segment location.
+- `whisperx_speaker`: original WhisperX speaker code, preserved for debugging only.
+- `transcript_speaker`: actual speaker inferred from the manual transcript, or empty when the row is not safely attributable.
+- `speaker_source`: provenance such as `preceding_marker`, `speaker_note`, `block_footer`, `speaker_hint`, `collector_bracket`, or `carried_forward_prev`.
+- `matched`, `score`: alignment status used to distinguish genuinely blank matched rows from skipped or misaligned utterances.
+
+Speaker recovery uses manual transcript evidence only. Explicit speaker markers and collector brackets have priority; short common speaker notes such as `[ФМП спрашивает:]` can provide a weak local speaker anchor. WhisperX speaker-code consistency is not used as evidence.
+
+`align-map` also writes `summary.tsv`. Its `matched_blank_speakers` column is the primary audit field for diarization coverage: it should be zero when every successfully matched caption has a transcript-derived speaker.
+Use `--require-diarized-matches` to make that condition a CLI quality gate and to fail when any mapping row cannot be aligned to an SRT.
+
 `manifest.tsv` columns:
 
 - `clip_id`, `audio_path`, `text_path`, `text_original_path`: deterministic exported file references.
@@ -76,6 +91,10 @@ Human-facing intermediate files are UTF-8 TSV.
 and matching chunk audio laid out as `pez_001/pez_001No1.wav`. It writes the same directory shape as
 `cut_samples`: `pez_001/pez_001No1/001_SPEAKER_00_00-00-00-031.wav`, plus a normalized `.txt`
 caption and the original stressed/manual caption as `_orig.txt`.
+When a matching `speaker_maps/{chunk}.speaker_map.csv` exists, transcript-derived speakers from that
+map are used in exported clip names and manifest rows.
+Use `--require-diarized-matches` to fail export if any matched segment lacks a transcript-derived speaker
+or if a required speaker map is missing.
 
 `align-embeddings` is an optional side path for the old embedding experiment. It removes bracketed interviewer prompts, segments dialect text around pauses, and aligns segment pairs with a lazily loaded `sentence-transformers` model. It is not the default aligner, and normal parser/alignment tests do not require external models.
 

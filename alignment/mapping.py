@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-from .align import align_srt_file, write_aligned_tsv, write_speaker_map
+from .align import AlignedSegment, align_srt_file, write_aligned_tsv, write_speaker_map
 from .io import write_tsv
 
 MAPPING_SUMMARY_COLUMNS = [
@@ -16,6 +16,9 @@ MAPPING_SUMMARY_COLUMNS = [
     "aligned_tsv",
     "speaker_map",
     "segments",
+    "matched_segments",
+    "blank_speakers",
+    "matched_blank_speakers",
     "status",
 ]
 
@@ -41,6 +44,31 @@ def row_speaker_hint(row: dict[str, str]) -> str:
         or row.get("speaker_hint", "")
         or row.get("respondent", "")
     ).strip().strip("[]:")
+
+
+def speaker_summary(aligned: list[AlignedSegment]) -> dict[str, str]:
+    """Return compact speaker coverage metrics for aligned segments."""
+    matched = sum(1 for item in aligned if item.matched)
+    blank = sum(1 for item in aligned if not item.transcript_speaker)
+    matched_blank = sum(1 for item in aligned if item.matched and not item.transcript_speaker)
+    return {
+        "segments": str(len(aligned)),
+        "matched_segments": str(matched),
+        "blank_speakers": str(blank),
+        "matched_blank_speakers": str(matched_blank),
+    }
+
+
+def summary_quality_errors(summary: list[dict[str, str]]) -> list[str]:
+    """Return quality-gate errors for align-map summary rows."""
+    errors = []
+    incomplete = [row for row in summary if row["status"] != "aligned"]
+    if incomplete:
+        errors.append(f"{len(incomplete)} mapping rows were not aligned")
+    missing = sum(int(row["matched_blank_speakers"]) for row in summary)
+    if missing:
+        errors.append(f"{missing} matched segments have no transcript-derived speaker")
+    return errors
 
 
 def align_mapping_table(
@@ -82,6 +110,9 @@ def align_mapping_table(
                     "aligned_tsv": "",
                     "speaker_map": "",
                     "segments": "0",
+                    "matched_segments": "0",
+                    "blank_speakers": "0",
+                    "matched_blank_speakers": "0",
                     "status": "missing_srt",
                 }
             )
@@ -100,6 +131,7 @@ def align_mapping_table(
         )
         write_aligned_tsv(stem, aligned, aligned_tsv_path)
         write_speaker_map(aligned, speaker_map_path)
+        coverage = speaker_summary(aligned)
         summary.append(
             {
                 "name": stem,
@@ -108,7 +140,7 @@ def align_mapping_table(
                 "aligned_srt": str(aligned_srt_path),
                 "aligned_tsv": str(aligned_tsv_path),
                 "speaker_map": str(speaker_map_path),
-                "segments": str(len(aligned)),
+                **coverage,
                 "status": "aligned",
             }
         )

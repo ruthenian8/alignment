@@ -1,6 +1,8 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from alignment.align import (
     align_segments,
     align_srt_file,
@@ -10,7 +12,13 @@ from alignment.align import (
     remove_alignment_notes,
 )
 from alignment.audio import build_cut_command
-from alignment.export import export_aligned_srt_tree, export_segments, normalize_caption_text
+from alignment.cli import main
+from alignment.export import (
+    clean_speaker_code,
+    export_aligned_srt_tree,
+    export_segments,
+    normalize_caption_text,
+)
 from alignment.srt import parse_srt
 
 
@@ -236,6 +244,25 @@ def test_unknown_speaker_does_not_carry_forward_when_inferring_missing_speakers(
     assert [item.srt.speaker for item in updated] == ["[UNK]:", "[SPEAKER_01]:"]
 
 
+def test_transcript_speaker_does_not_carry_to_unmatched_segments():
+    srt = parse_srt(
+        """
+1
+00:00:00,000 --> 00:00:01,000
+[SPEAKER_00]: добрый день
+
+2
+00:00:01,000 --> 00:00:02,000
+[SPEAKER_01]: unrelated
+""".strip()
+    )
+    aligned = align_segments(srt, "[АБ:] до\\брый день", similarity_threshold=0.9)
+    updated = apply_transcript_speakers(aligned, "[АБ:] до\\брый день", infer_missing=True)
+    assert [item.matched for item in updated] == [True, False]
+    assert [item.srt.speaker for item in updated] == ["[АБ]:", "[SPEAKER_01]:"]
+    assert [item.transcript_speaker for item in updated] == ["[АБ]:", ""]
+
+
 def test_mixed_collector_question_and_answer_keeps_srt_speaker():
     srt = parse_srt("1\n00:00:00,000 --> 00:00:01,000\n[SPEAKER_01]: она была уже да\n")
     transcript = "[Она была уже?] Да,"
@@ -370,6 +397,12 @@ def test_normalize_caption_text_removes_stress_marks_but_keeps_readable_text():
     assert normalize_caption_text("Во­­­­­_т, ро\\дом  она\\.") == "Во­­­­­т, родом она."
 
 
+def test_clean_speaker_code_is_filename_safe():
+    assert clean_speaker_code("[ХВВ, БВИ, ГЭС]:") == "ХВВ-БВИ-ГЭС"
+    assert clean_speaker_code("[???]:") == "UNK"
+    assert clean_speaker_code("") == "UNKNOWN"
+
+
 def test_export_aligned_srt_tree_matches_cut_samples_layout(tmp_path: Path):
     aligned_root = tmp_path / "aligned-root"
     audio_root = tmp_path / "audio"
@@ -382,7 +415,8 @@ def test_export_aligned_srt_tree_matches_cut_samples_layout(tmp_path: Path):
     (audio_dir / "and_001No1.wav").write_bytes(b"not real wav")
     (speaker_map_dir / "and_001No1.speaker_map.csv").write_text(
         "srt_index,start,end,whisperx_speaker,transcript_speaker,speaker_source,matched,score\n"
-        '1,"00:00:00,031","00:00:01,250",[SPEAKER_00]:,[АБ]:,preceding_marker,True,1.000\n',
+        '1,"00:00:00,031","00:00:01,250",[SPEAKER_00]:,[АБ]:,preceding_marker,True,1.000\n'
+        '2,"00:00:01,250","00:00:02,000",[SPEAKER_01]:,,unmatched,False,0.000\n',
         encoding="utf-8",
     )
     (aligned_dir / "and_001No1.aligned.srt").write_text(
@@ -404,11 +438,13 @@ def test_export_aligned_srt_tree_matches_cut_samples_layout(tmp_path: Path):
             audio_root,
             tmp_path / "cut_samples",
             tmp_path / "manifest.tsv",
+            require_diarized_matches=True,
         )
 
-    first = tmp_path / "cut_samples" / "and_001" / "and_001No1" / "001_SPEAKER_00_00-00-00-031"
+    first = tmp_path / "cut_samples" / "and_001" / "and_001No1" / "001_АБ_00-00-00-031"
     second = tmp_path / "cut_samples" / "and_001" / "and_001No1" / "002_SPEAKER_01_00-00-01-250"
     assert len(rows) == 2
+    assert rows[0]["speaker"] == "[АБ]:"
     assert first.with_suffix(".txt").read_text(encoding="utf-8") == "Во­­­­­т, родом."
     assert first.with_name(f"{first.name}_orig.txt").read_text(encoding="utf-8") == "Во­­­­­_т, ро\\дом."
     assert second.with_suffix(".txt").read_text(encoding="utf-8") == "Да."
@@ -420,3 +456,156 @@ def test_export_aligned_srt_tree_matches_cut_samples_layout(tmp_path: Path):
     )
     assert (first.parent / "speaker_map.csv").read_text(encoding="utf-8").startswith("srt_index,start")
     assert (tmp_path / "manifest.tsv").exists()
+
+
+def test_export_aligned_srt_tree_rejects_matched_blank_speakers(tmp_path: Path):
+    aligned_root = tmp_path / "aligned-root"
+    audio_root = tmp_path / "audio"
+    aligned_dir = aligned_root / "and_001" / "aligned"
+    speaker_map_dir = aligned_root / "and_001" / "speaker_maps"
+    audio_dir = audio_root / "and_001"
+    aligned_dir.mkdir(parents=True)
+    speaker_map_dir.mkdir(parents=True)
+    audio_dir.mkdir(parents=True)
+    (audio_dir / "and_001No1.wav").write_bytes(b"not real wav")
+    (speaker_map_dir / "and_001No1.speaker_map.csv").write_text(
+        "srt_index,start,end,whisperx_speaker,transcript_speaker,speaker_source,matched,score\n"
+        '1,"00:00:00,031","00:00:01,250",[SPEAKER_00]:,,unmatched,True,1.000\n',
+        encoding="utf-8",
+    )
+    (aligned_dir / "and_001No1.aligned.srt").write_text(
+        "1\n00:00:00,031 --> 00:00:01,250\n[SPEAKER_00]: текст\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="Matched segments"):
+        export_aligned_srt_tree(
+            aligned_root,
+            audio_root,
+            tmp_path / "cut_samples",
+            require_diarized_matches=True,
+            run=False,
+        )
+
+
+def test_export_aligned_srt_tree_ignores_unmatched_speaker_map_rows(tmp_path: Path):
+    aligned_root = tmp_path / "aligned-root"
+    audio_root = tmp_path / "audio"
+    aligned_dir = aligned_root / "and_001" / "aligned"
+    speaker_map_dir = aligned_root / "and_001" / "speaker_maps"
+    audio_dir = audio_root / "and_001"
+    aligned_dir.mkdir(parents=True)
+    speaker_map_dir.mkdir(parents=True)
+    audio_dir.mkdir(parents=True)
+    (audio_dir / "and_001No1.wav").write_bytes(b"not real wav")
+    (speaker_map_dir / "and_001No1.speaker_map.csv").write_text(
+        "srt_index,start,end,whisperx_speaker,transcript_speaker,speaker_source,matched,score\n"
+        '1,"00:00:00,031","00:00:01,250",[SPEAKER_00]:,[АБ]:,stale_carry,False,0.000\n',
+        encoding="utf-8",
+    )
+    (aligned_dir / "and_001No1.aligned.srt").write_text(
+        "1\n00:00:00,031 --> 00:00:01,250\n[SPEAKER_00]: текст\n",
+        encoding="utf-8",
+    )
+
+    rows = export_aligned_srt_tree(aligned_root, audio_root, tmp_path / "cut_samples", run=False)
+
+    assert rows[0]["clip_id"] == "001_SPEAKER_00_00-00-00-031"
+    assert rows[0]["speaker"] == "[SPEAKER_00]:"
+
+
+def test_export_aligned_srt_tree_requires_speaker_maps_when_guarded(tmp_path: Path):
+    aligned_root = tmp_path / "aligned-root"
+    audio_root = tmp_path / "audio"
+    aligned_dir = aligned_root / "and_001" / "aligned"
+    audio_dir = audio_root / "and_001"
+    aligned_dir.mkdir(parents=True)
+    audio_dir.mkdir(parents=True)
+    (audio_dir / "and_001No1.wav").write_bytes(b"not real wav")
+    (aligned_dir / "and_001No1.aligned.srt").write_text(
+        "1\n00:00:00,031 --> 00:00:01,250\n[SPEAKER_00]: текст\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="Missing speaker map"):
+        export_aligned_srt_tree(
+            aligned_root,
+            audio_root,
+            tmp_path / "cut_samples",
+            require_diarized_matches=True,
+            run=False,
+        )
+
+
+def test_export_aligned_srt_tree_requires_complete_speaker_maps_when_guarded(tmp_path: Path):
+    aligned_root = tmp_path / "aligned-root"
+    audio_root = tmp_path / "audio"
+    aligned_dir = aligned_root / "and_001" / "aligned"
+    speaker_map_dir = aligned_root / "and_001" / "speaker_maps"
+    audio_dir = audio_root / "and_001"
+    aligned_dir.mkdir(parents=True)
+    speaker_map_dir.mkdir(parents=True)
+    audio_dir.mkdir(parents=True)
+    (audio_dir / "and_001No1.wav").write_bytes(b"not real wav")
+    (speaker_map_dir / "and_001No1.speaker_map.csv").write_text(
+        "srt_index,start,end,whisperx_speaker,transcript_speaker,speaker_source,matched,score\n"
+        '1,"00:00:00,031","00:00:01,250",[SPEAKER_00]:,[АБ]:,preceding_marker,True,1.000\n',
+        encoding="utf-8",
+    )
+    (aligned_dir / "and_001No1.aligned.srt").write_text(
+        """
+1
+00:00:00,031 --> 00:00:01,250
+[SPEAKER_00]: первый
+
+2
+00:00:01,250 --> 00:00:02,000
+[SPEAKER_01]: второй
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="lacks rows for SRT indices 2"):
+        export_aligned_srt_tree(
+            aligned_root,
+            audio_root,
+            tmp_path / "cut_samples",
+            require_diarized_matches=True,
+            run=False,
+        )
+
+
+def test_export_aligned_map_cli_accepts_diarized_matches_guard(tmp_path: Path):
+    aligned_root = tmp_path / "aligned-root"
+    audio_root = tmp_path / "audio"
+    output_root = tmp_path / "cut_samples"
+    aligned_dir = aligned_root / "and_001" / "aligned"
+    speaker_map_dir = aligned_root / "and_001" / "speaker_maps"
+    audio_dir = audio_root / "and_001"
+    aligned_dir.mkdir(parents=True)
+    speaker_map_dir.mkdir(parents=True)
+    audio_dir.mkdir(parents=True)
+    (audio_dir / "and_001No1.wav").write_bytes(b"not real wav")
+    (speaker_map_dir / "and_001No1.speaker_map.csv").write_text(
+        "srt_index,start,end,whisperx_speaker,transcript_speaker,speaker_source,matched,score\n"
+        '1,"00:00:00,031","00:00:01,250",[SPEAKER_00]:,[АБ]:,preceding_marker,True,1.000\n',
+        encoding="utf-8",
+    )
+    (aligned_dir / "and_001No1.aligned.srt").write_text(
+        "1\n00:00:00,031 --> 00:00:01,250\n[SPEAKER_00]: текст\n",
+        encoding="utf-8",
+    )
+
+    with patch("alignment.export.subprocess.run"):
+        main(
+            [
+                "export-aligned-map",
+                str(aligned_root),
+                str(audio_root),
+                str(output_root),
+                "--require-diarized-matches",
+            ]
+        )
+
+    assert (output_root / "and_001" / "and_001No1" / "001_АБ_00-00-00-031.wav").exists() is False
+    assert (output_root / "and_001" / "and_001No1" / "001_АБ_00-00-00-031.txt").exists()

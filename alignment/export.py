@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import re
 import shutil
 import subprocess
@@ -27,13 +28,69 @@ def clip_id(segment: SrtSegment) -> str:
 
 def clean_speaker_code(speaker: str) -> str:
     """Return a speaker code suitable for cut-sample filenames."""
-    return speaker.strip().strip("[]:") or "UNKNOWN"
+    code = speaker.strip().strip("[]:")
+    if not code:
+        return "UNKNOWN"
+    if set(code) == {"?"}:
+        return "UNK"
+    code = re.sub(r"\s*,\s*", "-", code)
+    code = re.sub(r"\s+", "-", code)
+    code = re.sub(r"[^0-9A-ZА-ЯЁa-zа-яё?_-]+", "", code)
+    return code.replace("?", "UNK") or "UNKNOWN"
 
 
 def normalize_caption_text(text: str) -> str:
     """Normalize a caption for ASR references while preserving readable punctuation."""
     text = STRESS_MARK_RE.sub("", text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+def speaker_map_by_index(path: Path) -> dict[int, str]:
+    """Read transcript-derived speakers from a speaker map."""
+    if not path.exists():
+        return {}
+    speakers = {}
+    with path.open(encoding="utf-8-sig", newline="") as file:
+        for row in csv.DictReader(file):
+            matched = str(row.get("matched", "")).strip().lower() in {"true", "1", "yes", "y"}
+            if not matched:
+                continue
+            speaker = row.get("transcript_speaker", "").strip()
+            if speaker:
+                speakers[int(row["srt_index"])] = speaker
+    return speakers
+
+
+def has_matched_blank_speakers(path: Path) -> bool:
+    """Return true when a speaker map has matched rows without transcript speakers."""
+    with path.open(encoding="utf-8-sig", newline="") as file:
+        for row in csv.DictReader(file):
+            matched = str(row.get("matched", "")).strip().lower() in {"true", "1", "yes", "y"}
+            if matched and not row.get("transcript_speaker", "").strip():
+                return True
+    return False
+
+
+def speaker_map_indices(path: Path) -> set[int]:
+    """Return SRT indices represented in a speaker map."""
+    with path.open(encoding="utf-8-sig", newline="") as file:
+        return {int(row["srt_index"]) for row in csv.DictReader(file)}
+
+
+def apply_speaker_map(segments: list[SrtSegment], speakers: dict[int, str]) -> list[SrtSegment]:
+    """Return SRT segments with transcript-derived speakers applied where available."""
+    if not speakers:
+        return segments
+    return [
+        SrtSegment(
+            segment.index,
+            segment.start,
+            segment.end,
+            speakers.get(segment.index, segment.speaker),
+            segment.text,
+        )
+        for segment in segments
+    ]
 
 
 def _export_srt_segments(
@@ -123,10 +180,13 @@ def export_aligned_srt(
     aligned_srt_path: Path | str,
     output_dir: Path | str,
     *,
+    speaker_map_path: Path | str | None = None,
     run: bool = True,
 ) -> list[dict[str, str]]:
     """Cut one aligned SRT into wav, normalized txt, and original _orig.txt files."""
     segments = parse_srt(Path(aligned_srt_path).read_text(encoding="utf-8-sig"))
+    if speaker_map_path is not None:
+        segments = apply_speaker_map(segments, speaker_map_by_index(Path(speaker_map_path)))
     clean_text_by_index = {segment.index: normalize_caption_text(segment.text) for segment in segments}
     return _export_srt_segments(
         input_audio,
@@ -143,6 +203,7 @@ def export_aligned_srt_tree(
     output_root: Path | str,
     manifest_path: Path | str | None = None,
     *,
+    require_diarized_matches: bool = False,
     run: bool = True,
 ) -> list[dict[str, str]]:
     """Export a tree of ``corpus/aligned/*.aligned.srt`` files like ``cut_samples``."""
@@ -156,15 +217,26 @@ def export_aligned_srt_tree(
         audio_path = audio_base / corpus / f"{chunk}.wav"
         if not audio_path.exists():
             raise FileNotFoundError(f"Missing chunk audio for {aligned_srt}: {audio_path}")
+        speaker_map = aligned_base / corpus / "speaker_maps" / f"{chunk}.speaker_map.csv"
+        if require_diarized_matches:
+            if not speaker_map.exists():
+                raise ValueError(f"Missing speaker map for diarization guard: {speaker_map}")
+            segments = parse_srt(aligned_srt.read_text(encoding="utf-8-sig"))
+            missing_indices = {segment.index for segment in segments} - speaker_map_indices(speaker_map)
+            if missing_indices:
+                missing_text = ", ".join(str(index) for index in sorted(missing_indices))
+                raise ValueError(f"Speaker map lacks rows for SRT indices {missing_text}: {speaker_map}")
+            if has_matched_blank_speakers(speaker_map):
+                raise ValueError(f"Matched segments without transcript speakers in {speaker_map}")
         rows.extend(
             export_aligned_srt(
                 audio_path,
                 aligned_srt,
                 output_base / corpus / chunk,
+                speaker_map_path=speaker_map,
                 run=run,
             )
         )
-        speaker_map = aligned_base / corpus / "speaker_maps" / f"{chunk}.speaker_map.csv"
         if speaker_map.exists():
             target_dir = output_base / corpus / chunk
             target_dir.mkdir(parents=True, exist_ok=True)

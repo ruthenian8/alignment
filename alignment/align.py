@@ -459,6 +459,9 @@ def apply_transcript_speakers(
     speaker_blocks = speaker_blocks_from_transcript(transcript)
     last_tag = leading_speaker_tag(transcript) if infer_missing else ""
     for item in aligned:
+        if not item.matched:
+            output.append(item)
+            continue
         tag, source = aligned_speaker_tag(item, transcript, speaker_blocks)
         if tag:
             if tag != UNKNOWN_SPEAKER:

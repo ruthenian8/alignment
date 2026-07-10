@@ -165,13 +165,19 @@ def explicit_row_speaker(
 def fill_speaker_gaps(rows: list[dict[str, str]], leading_tag: str) -> list[dict[str, str]]:
     """Fill safe blank speaker spans inside a chunk."""
     filled = [dict(row) for row in rows]
+    for row in filled:
+        if not parse_bool(row.get("matched", "")):
+            row["tag"] = ""
+            row["source"] = "unmatched"
+
     anchor_indices = [index for index, row in enumerate(filled) if row["tag"]]
 
     if leading_tag:
         first_anchor = anchor_indices[0] if anchor_indices else len(filled)
         for row in filled[:first_anchor]:
-            row["tag"] = leading_tag
-            row["source"] = "leading_context"
+            if parse_bool(row.get("matched", "")):
+                row["tag"] = leading_tag
+                row["source"] = "leading_context"
 
     anchor_indices = [index for index, row in enumerate(filled) if row["tag"]]
     for left, right in zip(anchor_indices, anchor_indices[1:], strict=False):
@@ -179,7 +185,7 @@ def fill_speaker_gaps(rows: list[dict[str, str]], leading_tag: str) -> list[dict
         right_tag = filled[right]["tag"]
         if left_tag == right_tag and left_tag != UNKNOWN_SPEAKER:
             for row in filled[left + 1 : right]:
-                if not row["tag"]:
+                if not row["tag"] and parse_bool(row.get("matched", "")):
                     row["tag"] = left_tag
                     row["source"] = "bridged_same_speaker"
 
@@ -193,11 +199,13 @@ def fill_speaker_gaps(rows: list[dict[str, str]], leading_tag: str) -> list[dict
                 current = row["tag"]
                 saw_actual_anchor = True
         elif current:
-            row["tag"] = current
-            row["source"] = "carried_forward_prev"
+            if parse_bool(row.get("matched", "")):
+                row["tag"] = current
+                row["source"] = "carried_forward_prev"
         elif leading_tag and not saw_actual_anchor:
-            row["tag"] = leading_tag
-            row["source"] = "leading_context"
+            if parse_bool(row.get("matched", "")):
+                row["tag"] = leading_tag
+                row["source"] = "leading_context"
     return filled
 
 
