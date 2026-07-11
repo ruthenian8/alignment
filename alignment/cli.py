@@ -119,6 +119,11 @@ def build_parser() -> argparse.ArgumentParser:
     export_aligned.add_argument("output_root", type=Path, help="Output cut_samples-style root.")
     export_aligned.add_argument("--manifest", type=Path, help="Optional output manifest TSV path.")
     export_aligned.add_argument(
+        "--corpus",
+        action="append",
+        help="Only export this corpus directory from aligned_root. May be repeated.",
+    )
+    export_aligned.add_argument(
         "--require-diarized-matches",
         action="store_true",
         help="Fail when a matched exported segment has no transcript-derived speaker.",
@@ -215,6 +220,7 @@ def main(argv: list[str] | None = None) -> None:
             args.audio_root,
             args.output_root,
             args.manifest,
+            corpora=set(args.corpus) if args.corpus else None,
             require_diarized_matches=args.require_diarized_matches,
             matched_only=args.matched_only,
             min_match_ratio=args.min_match_ratio,

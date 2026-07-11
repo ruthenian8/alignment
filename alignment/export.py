@@ -240,6 +240,7 @@ def export_aligned_srt_tree(
     output_root: Path | str,
     manifest_path: Path | str | None = None,
     *,
+    corpora: set[str] | None = None,
     require_diarized_matches: bool = False,
     matched_only: bool = False,
     min_match_ratio: float = 0.0,
@@ -253,6 +254,8 @@ def export_aligned_srt_tree(
     ratio_cache: dict[str, dict[str, float]] = {}
     for aligned_srt in sorted(aligned_base.glob("*/aligned/*.aligned.srt")):
         corpus = aligned_srt.parent.parent.name
+        if corpora is not None and corpus not in corpora:
+            continue
         chunk = aligned_srt.name.removesuffix(".aligned.srt")
         audio_path = audio_base / corpus / f"{chunk}.wav"
         if not audio_path.exists():

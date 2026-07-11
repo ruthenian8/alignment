@@ -98,6 +98,8 @@ or if a required speaker map is missing. By default, export preserves all aligne
 unmatched rows that fall back to the original SRT text. Add `--matched-only` to export only rows that
 were matched to manual transcript text. Add `--min-match-ratio` to make export re-check the
 `align-map` summary and fail low-coverage chunks even if the alignment stage was run without a gate.
+Use repeated `--corpus` options when an aligned root contains multiple corpus directories but the
+audio root or export job should cover only a subset.
 
 `align-embeddings` is an optional side path for the old embedding experiment. It removes bracketed interviewer prompts, segments dialect text around pauses, and aligns segment pairs with a lazily loaded `sentence-transformers` model. It is not the default aligner, and normal parser/alignment tests do not require external models.
 

@@ -721,3 +721,42 @@ def test_export_aligned_map_cli_accepts_diarized_matches_guard(tmp_path: Path):
 
     assert (output_root / "and_001" / "and_001No1" / "001_АБ_00-00-00-031.wav").exists() is False
     assert (output_root / "and_001" / "and_001No1" / "001_АБ_00-00-00-031.txt").exists()
+
+
+def test_export_aligned_map_cli_can_filter_corpus_from_mixed_root(tmp_path: Path):
+    aligned_root = tmp_path / "aligned-root"
+    audio_root = tmp_path / "audio"
+    output_root = tmp_path / "cut_samples"
+    for corpus, chunk in [("and_001", "and_001No1"), ("pez_001", "pez_001No0")]:
+        aligned_dir = aligned_root / corpus / "aligned"
+        speaker_map_dir = aligned_root / corpus / "speaker_maps"
+        aligned_dir.mkdir(parents=True)
+        speaker_map_dir.mkdir(parents=True)
+        (speaker_map_dir / f"{chunk}.speaker_map.csv").write_text(
+            "srt_index,start,end,whisperx_speaker,transcript_speaker,speaker_source,matched,score\n"
+            '1,"00:00:00,031","00:00:01,250",[SPEAKER_00]:,[АБ]:,preceding_marker,True,1.000\n',
+            encoding="utf-8",
+        )
+        (aligned_dir / f"{chunk}.aligned.srt").write_text(
+            "1\n00:00:00,031 --> 00:00:01,250\n[SPEAKER_00]: текст\n",
+            encoding="utf-8",
+        )
+    (audio_root / "and_001").mkdir(parents=True)
+    (audio_root / "and_001" / "and_001No1.wav").write_bytes(b"not real wav")
+
+    with patch("alignment.export.subprocess.run"):
+        main(
+            [
+                "export-aligned-map",
+                str(aligned_root),
+                str(audio_root),
+                str(output_root),
+                "--corpus",
+                "and_001",
+                "--require-diarized-matches",
+                "--matched-only",
+            ]
+        )
+
+    assert (output_root / "and_001" / "and_001No1" / "001_АБ_00-00-00-031.txt").exists()
+    assert not (output_root / "pez_001").exists()
