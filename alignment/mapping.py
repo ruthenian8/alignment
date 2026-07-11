@@ -17,6 +17,7 @@ MAPPING_SUMMARY_COLUMNS = [
     "speaker_map",
     "segments",
     "matched_segments",
+    "match_ratio",
     "blank_speakers",
     "matched_blank_speakers",
     "status",
@@ -55,9 +56,11 @@ def speaker_summary(aligned: list[AlignedSegment]) -> dict[str, str]:
     matched = sum(1 for item in aligned if item.matched)
     blank = sum(1 for item in aligned if not item.transcript_speaker)
     matched_blank = sum(1 for item in aligned if item.matched and not item.transcript_speaker)
+    ratio = matched / len(aligned) if aligned else 0.0
     return {
         "segments": str(len(aligned)),
         "matched_segments": str(matched),
+        "match_ratio": f"{ratio:.3f}",
         "blank_speakers": str(blank),
         "matched_blank_speakers": str(matched_blank),
     }
@@ -71,7 +74,7 @@ def _sample_names(rows: list[dict[str, str]], limit: int = 5) -> str:
     return sample
 
 
-def summary_quality_errors(summary: list[dict[str, str]]) -> list[str]:
+def summary_quality_errors(summary: list[dict[str, str]], *, min_match_ratio: float = 0.0) -> list[str]:
     """Return quality-gate errors for align-map summary rows."""
     errors = []
     incomplete = [row for row in summary if row["status"] != "aligned"]
@@ -88,6 +91,20 @@ def summary_quality_errors(summary: list[dict[str, str]]) -> list[str]:
     missing = sum(int(row["matched_blank_speakers"]) for row in summary)
     if missing:
         errors.append(f"{missing} matched segments have no transcript-derived speaker")
+    if min_match_ratio > 0:
+        low_match = [
+            row
+            for row in summary
+            if row["status"] == "aligned"
+            and int(row.get("segments", "0") or 0) > 0
+            and float(row.get("match_ratio", "0") or 0) < min_match_ratio
+        ]
+        if low_match:
+            sample = _sample_names(low_match)
+            message = f"{len(low_match)} aligned rows are below minimum match ratio {min_match_ratio:.3f}"
+            if sample:
+                message += f": {sample}"
+            errors.append(message)
     return errors
 
 
@@ -131,6 +148,7 @@ def align_mapping_table(
                     "speaker_map": "",
                     "segments": "0",
                     "matched_segments": "0",
+                    "match_ratio": "0.000",
                     "blank_speakers": "0",
                     "matched_blank_speakers": "0",
                     "status": "missing_srt",

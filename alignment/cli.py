@@ -87,6 +87,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Fail when any matched SRT segment has no transcript-derived speaker.",
     )
+    align_map.add_argument(
+        "--min-match-ratio",
+        type=float,
+        default=0.0,
+        help="With --require-diarized-matches, fail aligned rows whose matched-segment ratio is lower.",
+    )
     add_transcript_speaker_args(align_map)
 
     export = subparsers.add_parser("export-corpus", help="Cut audio clips and write text plus manifest.")
@@ -187,7 +193,7 @@ def main(argv: list[str] | None = None) -> None:
             infer_missing_speakers=args.infer_missing_speakers,
         )
         if args.require_diarized_matches:
-            errors = summary_quality_errors(summary)
+            errors = summary_quality_errors(summary, min_match_ratio=args.min_match_ratio)
             if errors:
                 raise SystemExit("; ".join(errors))
     elif args.command == "export-corpus":

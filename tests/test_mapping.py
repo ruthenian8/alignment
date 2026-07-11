@@ -48,6 +48,7 @@ def test_align_map_reads_csv_and_writes_chunk_outputs(tmp_path: Path) -> None:
     assert [(row["name"], row["status"]) for row in summary] == [("chunk001", "aligned")]
     assert summary[0]["segments"] == "2"
     assert summary[0]["matched_segments"] == "2"
+    assert summary[0]["match_ratio"] == "1.000"
     assert summary[0]["blank_speakers"] == "0"
     assert summary[0]["matched_blank_speakers"] == "0"
     assert Path(summary[0]["speaker_map"]).name == "chunk001.speaker_map.csv"
@@ -147,24 +148,74 @@ def test_align_map_guard_rejects_missing_srt_rows(tmp_path: Path) -> None:
 
     summary = read_tsv(output_dir / "summary.tsv")
     assert summary[0]["status"] == "missing_srt"
+    assert summary[0]["match_ratio"] == "0.000"
 
 
-def test_summary_quality_errors_reports_incomplete_and_undiarized_rows() -> None:
+def test_summary_quality_errors_reports_incomplete_undiarized_and_low_match_rows() -> None:
     summary = [
         {
+            "name": "missing",
             "status": "missing_srt",
+            "segments": "0",
+            "match_ratio": "0.000",
             "matched_blank_speakers": "0",
         },
         {
+            "name": "blank-speaker",
             "status": "aligned",
+            "segments": "2",
+            "match_ratio": "1.000",
             "matched_blank_speakers": "2",
+        },
+        {
+            "name": "low-match",
+            "status": "aligned",
+            "segments": "10",
+            "match_ratio": "0.100",
+            "matched_blank_speakers": "0",
         },
     ]
 
-    assert summary_quality_errors(summary) == [
-        "1 mapping rows were not aligned (missing_srt: 1)",
+    assert summary_quality_errors(summary, min_match_ratio=0.2) == [
+        "1 mapping rows were not aligned (missing_srt: 1): missing",
         "2 matched segments have no transcript-derived speaker",
+        "1 aligned rows are below minimum match ratio 0.200: low-match",
     ]
+
+
+def test_align_map_guard_can_reject_low_match_ratio(tmp_path: Path) -> None:
+    mapping = tmp_path / "mapping.csv"
+    srt_dir = tmp_path / "srt"
+    output_dir = tmp_path / "out"
+    srt_dir.mkdir()
+    mapping.write_text('name,transcript,speaker_hint\nchunk001.wav,"ручной ответ",АБ\n', encoding="utf-8")
+    (srt_dir / "chunk001.srt").write_text(
+        "1\n"
+        "00:00:00,000 --> 00:00:01,000\n"
+        "[SPEAKER_00]: unrelated\n\n"
+        "2\n"
+        "00:00:01,000 --> 00:00:02,000\n"
+        "[SPEAKER_00]: ручной ответ\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SystemExit, match="below minimum match ratio 0.750: chunk001"):
+        main(
+            [
+                "align-map",
+                str(mapping),
+                str(srt_dir),
+                str(output_dir),
+                "--use-transcript-speakers",
+                "--require-diarized-matches",
+                "--min-match-ratio",
+                "0.75",
+            ]
+        )
+
+    summary = read_tsv(output_dir / "summary.tsv")
+    assert summary[0]["matched_segments"] == "1"
+    assert summary[0]["match_ratio"] == "0.500"
 
 
 def test_guarded_align_map_output_can_be_exported_with_diarized_matches(tmp_path: Path) -> None:

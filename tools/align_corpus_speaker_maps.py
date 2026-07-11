@@ -78,6 +78,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Fail when mapping rows are missing or matched segments lack transcript speakers.",
     )
+    parser.add_argument(
+        "--min-match-ratio",
+        type=float,
+        default=0.0,
+        help="With --require-diarized-matches, fail aligned rows whose matched-segment ratio is lower.",
+    )
     return parser.parse_args(argv)
 
 
@@ -326,7 +332,7 @@ def main(argv: list[str] | None = None) -> int:
             infer_missing_speakers=args.infer_missing_speakers,
         )
         if args.require_diarized_matches:
-            errors = summary_quality_errors(summary)
+            errors = summary_quality_errors(summary, min_match_ratio=args.min_match_ratio)
             if errors:
                 raise SystemExit(f"{name}: {'; '.join(errors)}")
         aligned += sum(row["status"] == "aligned" for row in summary)
