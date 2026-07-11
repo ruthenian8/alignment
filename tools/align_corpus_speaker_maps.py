@@ -306,6 +306,7 @@ def main(argv: list[str] | None = None) -> int:
 
     aligned = missing = 0
     for name, mapping, srt_dir in jobs:
+        print(f"{name}: aligning {mapping} against {srt_dir}", flush=True)
         summary = align_mapping_table(
             mapping,
             srt_dir,
@@ -319,9 +320,9 @@ def main(argv: list[str] | None = None) -> int:
                 raise SystemExit(f"{name}: {'; '.join(errors)}")
         aligned += sum(row["status"] == "aligned" for row in summary)
         missing += sum(row["status"] != "aligned" for row in summary)
-        print(f"{name}: {aligned} aligned so far, {missing} missing so far")
+        print(f"{name}: {aligned} aligned so far, {missing} missing so far", flush=True)
 
-    print(f"processed {len(jobs)} mapping tables; aligned {aligned}; missing {missing}")
+    print(f"processed {len(jobs)} mapping tables; aligned {aligned}; missing {missing}", flush=True)
     return 0
 
 
