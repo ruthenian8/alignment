@@ -6,6 +6,7 @@ import argparse
 import csv
 import re
 import sys
+from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -99,16 +100,26 @@ def best_block_speaker(transcript: str, blocks: list[tuple[str, str]]) -> str:
     normalized = normalize_for_match(transcript)
     if not normalized:
         return ""
+    transcript_tokens = normalized.split()
+    transcript_counts = Counter(transcript_tokens)
     matches = []
     for block, tag in blocks:
         block_normalized = normalize_for_match(block)
         if normalized in block_normalized or block_normalized in normalized:
-            matches.append((tag, len(block_normalized)))
-    tags = {tag for tag, _ in matches}
+            matches.append((tag, len(block_normalized), 1.0))
+            continue
+        block_tokens = block_normalized.split()
+        if len(transcript_tokens) < 4 or len(block_tokens) < 4:
+            continue
+        overlap = sum((transcript_counts & Counter(block_tokens)).values())
+        coverage = overlap / min(len(transcript_tokens), len(block_tokens))
+        if coverage >= 0.65:
+            matches.append((tag, len(block_normalized), coverage))
+    tags = {tag for tag, _, _ in matches}
     if len(tags) == 1:
         return next(iter(tags))
     if matches:
-        matches.sort(key=lambda item: item[1])
+        matches.sort(key=lambda item: (-item[2], item[1]))
         return matches[0][0]
     return ""
 

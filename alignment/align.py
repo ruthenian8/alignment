@@ -213,6 +213,18 @@ def find_speaker_tag(text: str) -> str:
     return next((tag for tag in reversed(tags) if tag), "")
 
 
+def find_non_note_speaker_tag_in_span(text: str) -> str:
+    """Find the first actual speaker marker inside an aligned transcript span."""
+    for match in SPEAKER_MARKER_RE.finditer(text):
+        marker = match.group(1)
+        if speaker_tag_from_common_note(marker):
+            continue
+        tag = speaker_tag_from_marker(marker)
+        if tag and tag != UNKNOWN_SPEAKER:
+            return tag
+    return ""
+
+
 def find_speaker_tag_before_span(transcript: str, start: int) -> str:
     """Find the closest valid speaker marker at or before a transcript span."""
     if start < 0:
@@ -431,6 +443,9 @@ def aligned_speaker_tag(
     tag = find_non_note_speaker_tag_before_span(transcript, item.transcript_start)
     if tag:
         return tag, "preceding_marker"
+    tag = find_non_note_speaker_tag_in_span(item.transcript_text)
+    if tag:
+        return tag, "span_marker"
     tag = speaker_note_tag_at_span_start(transcript, item.transcript_start)
     if tag:
         return tag, "speaker_note"

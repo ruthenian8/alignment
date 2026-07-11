@@ -4,6 +4,7 @@ from unittest.mock import patch
 import pytest
 
 from alignment.align import (
+    AlignedSegment,
     align_segments,
     align_srt_file,
     aligned_to_speaker_map_rows,
@@ -19,7 +20,7 @@ from alignment.export import (
     export_segments,
     normalize_caption_text,
 )
-from alignment.srt import parse_srt
+from alignment.srt import SrtSegment, parse_srt
 
 
 def test_alignment_is_monotonic_and_preserves_original_transcript_text():
@@ -269,6 +270,26 @@ def test_mixed_collector_question_and_answer_keeps_srt_speaker():
     aligned = align_segments(srt, transcript, max_span=6, similarity_threshold=0.2)
     updated = apply_transcript_speakers(aligned, transcript, infer_missing=True)
     assert updated[0].srt.speaker == "[SPEAKER_01]:"
+
+
+def test_span_speaker_marker_labels_mixed_opening_context_and_answer():
+    transcript = "[Когда выгоняли скот первый раз в году?] [ШВИ:] Мы выгоня\\ем."
+    segment = SrtSegment(1, "00:00:00,000", "00:00:01,000", "[SPEAKER_02]:", "мы выгоняем")
+    aligned = [
+        AlignedSegment(
+            segment,
+            segment.speaker,
+            transcript,
+            "мы",
+            True,
+            0.609,
+            0,
+            len(transcript),
+        )
+    ]
+    updated = apply_transcript_speakers(aligned, transcript, infer_missing=True)
+    assert updated[0].srt.speaker == "[ШВИ]:"
+    assert updated[0].speaker_source == "span_marker"
 
 
 def test_collector_question_after_artificial_block_marker_gets_unknown():
