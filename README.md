@@ -28,9 +28,9 @@ alignment align-srt data/whisper_srt/pez_001/pez_001No0.srt transcript.txt outpu
 alignment align-srt data/whisper_srt/pez_001/pez_001No0.srt transcript.txt outputs/pez_001No0.srt --use-transcript-speakers --infer-missing-speakers --output-speaker-map outputs/pez_001No0.speaker_map.csv
 alignment align-embeddings data/whisper_srt/pez_001/pez_001No0.srt transcript.txt outputs/pez_001No0_embs.tsv
 alignment wer outputs/pez_001No0.tsv --top 20
-alignment align-map mapping.csv srt_dir build/aligned --use-transcript-speakers --infer-missing-speakers --require-diarized-matches
+alignment align-map mapping.csv srt_dir build/aligned --use-transcript-speakers --infer-missing-speakers --require-diarized-matches --min-match-ratio 0.2
 alignment export-corpus chunk.wav outputs/pez_001No0.srt outputs/pez_001No0.srt outputs/clips outputs/manifest.tsv
-alignment export-aligned-map build/align-map-wx-transcripts-srt-speakers hf-repo/cut_audio build/cut_samples --manifest build/cut_samples/manifest.tsv --require-diarized-matches
+alignment export-aligned-map build/align-map-wx-transcripts-srt-speakers hf-repo/cut_audio build/cut_samples --manifest build/cut_samples/manifest.tsv --require-diarized-matches --matched-only
 ```
 
 Write derived files under `build/` or `outputs/`. Keep files in `data/` as source fixtures.
@@ -77,8 +77,8 @@ Human-facing intermediate files are UTF-8 TSV.
 
 Speaker recovery uses manual transcript evidence only. Explicit speaker markers and collector brackets have priority; short common speaker notes such as `[ФМП спрашивает:]` can provide a weak local speaker anchor. WhisperX speaker-code consistency is not used as evidence.
 
-`align-map` also writes `summary.tsv`. Its `matched_blank_speakers` column is the primary audit field for diarization coverage: it should be zero when every successfully matched caption has a transcript-derived speaker.
-Use `--require-diarized-matches` to make that condition a CLI quality gate and to fail when any mapping row cannot be aligned to an SRT.
+`align-map` also writes `summary.tsv`. Its `matched_blank_speakers` column is the primary audit field for diarization coverage: it should be zero when every successfully matched caption has a transcript-derived speaker. `match_ratio` records the share of SRT segments that matched manual transcript text for each chunk, so very low-coverage chunks can be treated as likely misaligned instead of trusted.
+Use `--require-diarized-matches` to make diarization coverage a CLI quality gate and to fail when any mapping row cannot be aligned to an SRT. Add `--min-match-ratio` when final outputs should also reject low-coverage chunk alignments.
 
 `manifest.tsv` columns:
 
@@ -94,7 +94,9 @@ caption and the original stressed/manual caption as `_orig.txt`.
 When a matching `speaker_maps/{chunk}.speaker_map.csv` exists, transcript-derived speakers from that
 map are used in exported clip names and manifest rows.
 Use `--require-diarized-matches` to fail export if any matched segment lacks a transcript-derived speaker
-or if a required speaker map is missing.
+or if a required speaker map is missing. By default, export preserves all aligned SRT rows, including
+unmatched rows that fall back to the original SRT text. Add `--matched-only` to export only rows that
+were matched to manual transcript text.
 
 `align-embeddings` is an optional side path for the old embedding experiment. It removes bracketed interviewer prompts, segments dialect text around pauses, and aligns segment pairs with a lazily loaded `sentence-transformers` model. It is not the default aligner, and normal parser/alignment tests do not require external models.
 
