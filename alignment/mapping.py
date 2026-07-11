@@ -39,11 +39,15 @@ def chunk_stem(row: dict[str, str]) -> str:
 def row_speaker_hint(row: dict[str, str]) -> str:
     """Return an optional mapping-provided actual speaker tag."""
     return (
-        row.get("transcript_speaker", "")
-        or row.get("speaker", "")
-        or row.get("speaker_hint", "")
-        or row.get("respondent", "")
-    ).strip().strip("[]:")
+        (
+            row.get("transcript_speaker", "")
+            or row.get("speaker", "")
+            or row.get("speaker_hint", "")
+            or row.get("respondent", "")
+        )
+        .strip()
+        .strip("[]:")
+    )
 
 
 def speaker_summary(aligned: list[AlignedSegment]) -> dict[str, str]:
@@ -59,12 +63,28 @@ def speaker_summary(aligned: list[AlignedSegment]) -> dict[str, str]:
     }
 
 
+def _sample_names(rows: list[dict[str, str]], limit: int = 5) -> str:
+    names = [row.get("name", "").strip() for row in rows if row.get("name", "").strip()]
+    sample = ", ".join(names[:limit])
+    if len(names) > limit:
+        sample += f", +{len(names) - limit} more"
+    return sample
+
+
 def summary_quality_errors(summary: list[dict[str, str]]) -> list[str]:
     """Return quality-gate errors for align-map summary rows."""
     errors = []
     incomplete = [row for row in summary if row["status"] != "aligned"]
     if incomplete:
-        errors.append(f"{len(incomplete)} mapping rows were not aligned")
+        by_status = sorted({row["status"] for row in incomplete})
+        detail = ", ".join(
+            f"{status}: {sum(row['status'] == status for row in incomplete)}" for status in by_status
+        )
+        sample = _sample_names(incomplete)
+        message = f"{len(incomplete)} mapping rows were not aligned ({detail})"
+        if sample:
+            message += f": {sample}"
+        errors.append(message)
     missing = sum(int(row["matched_blank_speakers"]) for row in summary)
     if missing:
         errors.append(f"{missing} matched segments have no transcript-derived speaker")

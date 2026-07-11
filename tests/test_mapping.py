@@ -133,7 +133,7 @@ def test_align_map_guard_rejects_missing_srt_rows(tmp_path: Path) -> None:
     srt_dir.mkdir()
     mapping.write_text('name,transcript\nmissing.wav,"[АБ:] ручной ответ"\n', encoding="utf-8")
 
-    with pytest.raises(SystemExit, match="1 mapping rows were not aligned"):
+    with pytest.raises(SystemExit, match=r"1 mapping rows were not aligned \(missing_srt: 1\): missing"):
         main(
             [
                 "align-map",
@@ -162,7 +162,7 @@ def test_summary_quality_errors_reports_incomplete_and_undiarized_rows() -> None
     ]
 
     assert summary_quality_errors(summary) == [
-        "1 mapping rows were not aligned",
+        "1 mapping rows were not aligned (missing_srt: 1)",
         "2 matched segments have no transcript-derived speaker",
     ]
 
