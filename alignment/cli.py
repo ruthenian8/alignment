@@ -123,6 +123,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Fail when a matched exported segment has no transcript-derived speaker.",
     )
+    export_aligned.add_argument(
+        "--matched-only",
+        action="store_true",
+        help="Export only SRT rows matched to manual transcript text.",
+    )
 
     align_embeddings = subparsers.add_parser(
         "align-embeddings",
@@ -205,6 +210,7 @@ def main(argv: list[str] | None = None) -> None:
             args.output_root,
             args.manifest,
             require_diarized_matches=args.require_diarized_matches,
+            matched_only=args.matched_only,
         )
     elif args.command == "align-embeddings":
         extraction = extract_dialect_text(

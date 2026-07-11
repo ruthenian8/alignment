@@ -535,6 +535,49 @@ def test_export_aligned_srt_tree_ignores_unmatched_speaker_map_rows(tmp_path: Pa
     assert rows[0]["speaker"] == "[SPEAKER_00]:"
 
 
+def test_export_aligned_srt_tree_can_skip_unmatched_rows(tmp_path: Path):
+    aligned_root = tmp_path / "aligned-root"
+    audio_root = tmp_path / "audio"
+    aligned_dir = aligned_root / "and_001" / "aligned"
+    speaker_map_dir = aligned_root / "and_001" / "speaker_maps"
+    audio_dir = audio_root / "and_001"
+    aligned_dir.mkdir(parents=True)
+    speaker_map_dir.mkdir(parents=True)
+    audio_dir.mkdir(parents=True)
+    (audio_dir / "and_001No1.wav").write_bytes(b"not real wav")
+    (speaker_map_dir / "and_001No1.speaker_map.csv").write_text(
+        "srt_index,start,end,whisperx_speaker,transcript_speaker,speaker_source,matched,score\n"
+        '1,"00:00:00,031","00:00:01,250",[SPEAKER_00]:,[АБ]:,preceding_marker,True,1.000\n'
+        '2,"00:00:01,250","00:00:02,000",[SPEAKER_01]:,,unmatched,False,0.000\n',
+        encoding="utf-8",
+    )
+    (aligned_dir / "and_001No1.aligned.srt").write_text(
+        """
+1
+00:00:00,031 --> 00:00:01,250
+[SPEAKER_00]: ручной текст
+
+2
+00:00:01,250 --> 00:00:02,000
+[SPEAKER_01]: asr fallback
+""".strip(),
+        encoding="utf-8",
+    )
+
+    rows = export_aligned_srt_tree(
+        aligned_root,
+        audio_root,
+        tmp_path / "cut_samples",
+        matched_only=True,
+        run=False,
+    )
+
+    assert [row["clip_id"] for row in rows] == ["001_АБ_00-00-00-031"]
+    assert not (
+        tmp_path / "cut_samples" / "and_001" / "and_001No1" / "002_SPEAKER_01_00-00-01-250.txt"
+    ).exists()
+
+
 def test_export_aligned_srt_tree_requires_speaker_maps_when_guarded(tmp_path: Path):
     aligned_root = tmp_path / "aligned-root"
     audio_root = tmp_path / "audio"
@@ -625,6 +668,7 @@ def test_export_aligned_map_cli_accepts_diarized_matches_guard(tmp_path: Path):
                 str(audio_root),
                 str(output_root),
                 "--require-diarized-matches",
+                "--matched-only",
             ]
         )
 

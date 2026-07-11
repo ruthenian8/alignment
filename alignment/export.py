@@ -77,6 +77,17 @@ def speaker_map_indices(path: Path) -> set[int]:
         return {int(row["srt_index"]) for row in csv.DictReader(file)}
 
 
+def speaker_map_matched_indices(path: Path) -> set[int]:
+    """Return SRT indices marked as aligned to manual transcript text."""
+    matched_indices = set()
+    with path.open(encoding="utf-8-sig", newline="") as file:
+        for row in csv.DictReader(file):
+            matched = str(row.get("matched", "")).strip().lower() in {"true", "1", "yes", "y"}
+            if matched:
+                matched_indices.add(int(row["srt_index"]))
+    return matched_indices
+
+
 def apply_speaker_map(segments: list[SrtSegment], speakers: dict[int, str]) -> list[SrtSegment]:
     """Return SRT segments with transcript-derived speakers applied where available."""
     if not speakers:
@@ -181,10 +192,16 @@ def export_aligned_srt(
     output_dir: Path | str,
     *,
     speaker_map_path: Path | str | None = None,
+    matched_only: bool = False,
     run: bool = True,
 ) -> list[dict[str, str]]:
     """Cut one aligned SRT into wav, normalized txt, and original _orig.txt files."""
     segments = parse_srt(Path(aligned_srt_path).read_text(encoding="utf-8-sig"))
+    if matched_only:
+        if speaker_map_path is None:
+            raise ValueError("--matched-only export requires a speaker map")
+        matched_indices = speaker_map_matched_indices(Path(speaker_map_path))
+        segments = [segment for segment in segments if segment.index in matched_indices]
     if speaker_map_path is not None:
         segments = apply_speaker_map(segments, speaker_map_by_index(Path(speaker_map_path)))
     clean_text_by_index = {segment.index: normalize_caption_text(segment.text) for segment in segments}
@@ -204,6 +221,7 @@ def export_aligned_srt_tree(
     manifest_path: Path | str | None = None,
     *,
     require_diarized_matches: bool = False,
+    matched_only: bool = False,
     run: bool = True,
 ) -> list[dict[str, str]]:
     """Export a tree of ``corpus/aligned/*.aligned.srt`` files like ``cut_samples``."""
@@ -234,6 +252,7 @@ def export_aligned_srt_tree(
                 aligned_srt,
                 output_base / corpus / chunk,
                 speaker_map_path=speaker_map,
+                matched_only=matched_only,
                 run=run,
             )
         )
