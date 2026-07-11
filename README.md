@@ -30,7 +30,7 @@ alignment align-embeddings data/whisper_srt/pez_001/pez_001No0.srt transcript.tx
 alignment wer outputs/pez_001No0.tsv --top 20
 alignment align-map mapping.csv srt_dir build/aligned --use-transcript-speakers --infer-missing-speakers --require-diarized-matches --min-match-ratio 0.2
 alignment export-corpus chunk.wav outputs/pez_001No0.srt outputs/pez_001No0.srt outputs/clips outputs/manifest.tsv
-alignment export-aligned-map build/align-map-wx-transcripts-srt-speakers hf-repo/cut_audio build/cut_samples --manifest build/cut_samples/manifest.tsv --require-diarized-matches --matched-only
+alignment export-aligned-map build/align-map-wx-transcripts-srt-speakers hf-repo/cut_audio build/cut_samples --manifest build/cut_samples/manifest.tsv --require-diarized-matches --matched-only --min-match-ratio 0.2
 ```
 
 Write derived files under `build/` or `outputs/`. Keep files in `data/` as source fixtures.
@@ -96,7 +96,8 @@ map are used in exported clip names and manifest rows.
 Use `--require-diarized-matches` to fail export if any matched segment lacks a transcript-derived speaker
 or if a required speaker map is missing. By default, export preserves all aligned SRT rows, including
 unmatched rows that fall back to the original SRT text. Add `--matched-only` to export only rows that
-were matched to manual transcript text.
+were matched to manual transcript text. Add `--min-match-ratio` to make export re-check the
+`align-map` summary and fail low-coverage chunks even if the alignment stage was run without a gate.
 
 `align-embeddings` is an optional side path for the old embedding experiment. It removes bracketed interviewer prompts, segments dialect text around pauses, and aligns segment pairs with a lazily loaded `sentence-transformers` model. It is not the default aligner, and normal parser/alignment tests do not require external models.
 

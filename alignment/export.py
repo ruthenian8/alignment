@@ -88,6 +88,20 @@ def speaker_map_matched_indices(path: Path) -> set[int]:
     return matched_indices
 
 
+def summary_match_ratios(path: Path) -> dict[str, float]:
+    """Read per-chunk alignment match ratios from an align-map summary."""
+    ratios = {}
+    if not path.exists():
+        return ratios
+    with path.open(encoding="utf-8-sig", newline="") as file:
+        for row in csv.DictReader(file, delimiter="\t"):
+            try:
+                ratios[row["name"]] = float(row.get("match_ratio", "0") or 0)
+            except ValueError:
+                ratios[row["name"]] = 0.0
+    return ratios
+
+
 def apply_speaker_map(segments: list[SrtSegment], speakers: dict[int, str]) -> list[SrtSegment]:
     """Return SRT segments with transcript-derived speakers applied where available."""
     if not speakers:
@@ -222,6 +236,7 @@ def export_aligned_srt_tree(
     *,
     require_diarized_matches: bool = False,
     matched_only: bool = False,
+    min_match_ratio: float = 0.0,
     run: bool = True,
 ) -> list[dict[str, str]]:
     """Export a tree of ``corpus/aligned/*.aligned.srt`` files like ``cut_samples``."""
@@ -229,12 +244,24 @@ def export_aligned_srt_tree(
     audio_base = Path(audio_root)
     output_base = Path(output_root)
     rows = []
+    ratio_cache: dict[str, dict[str, float]] = {}
     for aligned_srt in sorted(aligned_base.glob("*/aligned/*.aligned.srt")):
         corpus = aligned_srt.parent.parent.name
         chunk = aligned_srt.name.removesuffix(".aligned.srt")
         audio_path = audio_base / corpus / f"{chunk}.wav"
         if not audio_path.exists():
             raise FileNotFoundError(f"Missing chunk audio for {aligned_srt}: {audio_path}")
+        if min_match_ratio > 0:
+            ratios = ratio_cache.setdefault(
+                corpus,
+                summary_match_ratios(aligned_base / corpus / "summary.tsv"),
+            )
+            if chunk not in ratios:
+                raise ValueError(f"Missing summary match ratio for {chunk}")
+            if ratios[chunk] < min_match_ratio:
+                raise ValueError(
+                    f"Alignment match ratio {ratios[chunk]:.3f} is below {min_match_ratio:.3f}: {chunk}"
+                )
         speaker_map = aligned_base / corpus / "speaker_maps" / f"{chunk}.speaker_map.csv"
         if require_diarized_matches:
             if not speaker_map.exists():

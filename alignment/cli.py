@@ -128,6 +128,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Export only SRT rows matched to manual transcript text.",
     )
+    export_aligned.add_argument(
+        "--min-match-ratio",
+        type=float,
+        default=0.0,
+        help="Fail chunks whose align-map summary match ratio is lower.",
+    )
 
     align_embeddings = subparsers.add_parser(
         "align-embeddings",
@@ -211,6 +217,7 @@ def main(argv: list[str] | None = None) -> None:
             args.manifest,
             require_diarized_matches=args.require_diarized_matches,
             matched_only=args.matched_only,
+            min_match_ratio=args.min_match_ratio,
         )
     elif args.command == "align-embeddings":
         extraction = extract_dialect_text(
