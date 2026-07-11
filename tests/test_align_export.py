@@ -19,6 +19,7 @@ from alignment.export import (
     export_aligned_srt_tree,
     export_segments,
     normalize_caption_text,
+    summary_match_ratios,
 )
 from alignment.srt import SrtSegment, parse_srt
 
@@ -612,6 +613,16 @@ def test_export_aligned_srt_tree_can_reject_low_match_ratio(tmp_path: Path):
             min_match_ratio=0.2,
             run=False,
         )
+
+
+def test_summary_match_ratios_falls_back_to_matched_segment_counts(tmp_path: Path):
+    summary = tmp_path / "summary.tsv"
+    summary.write_text(
+        "name\tsegments\tmatched_segments\tstatus\nchunk001\t4\t3\taligned\nchunk002\t0\t0\tmissing_srt\n",
+        encoding="utf-8",
+    )
+
+    assert summary_match_ratios(summary) == {"chunk001": 0.75, "chunk002": 0.0}
 
 
 def test_export_aligned_srt_tree_requires_speaker_maps_when_guarded(tmp_path: Path):

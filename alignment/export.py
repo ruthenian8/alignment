@@ -96,8 +96,14 @@ def summary_match_ratios(path: Path) -> dict[str, float]:
     with path.open(encoding="utf-8-sig", newline="") as file:
         for row in csv.DictReader(file, delimiter="\t"):
             try:
-                ratios[row["name"]] = float(row.get("match_ratio", "0") or 0)
-            except ValueError:
+                ratio = row.get("match_ratio", "")
+                if ratio:
+                    ratios[row["name"]] = float(ratio)
+                else:
+                    segments = int(row.get("segments", "0") or 0)
+                    matched = int(row.get("matched_segments", "0") or 0)
+                    ratios[row["name"]] = matched / segments if segments else 0.0
+            except (TypeError, ValueError):
                 ratios[row["name"]] = 0.0
     return ratios
 
