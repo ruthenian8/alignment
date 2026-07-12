@@ -215,7 +215,7 @@ def write_summary(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", type=Path, default=Path("build/cut_samples-srt-speakers"))
+    parser.add_argument("--root", type=Path, default=Path("build/cut_samples-transcript-speakers"))
     parser.add_argument("--output-dir", type=Path, default=Path("build/manual-validation-samples"))
     parser.add_argument("--set-a-size", type=int, default=500)
     parser.add_argument("--set-b-extra", type=int, default=500)

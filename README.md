@@ -30,11 +30,22 @@ alignment align-embeddings data/whisper_srt/pez_001/pez_001No0.srt transcript.tx
 alignment wer outputs/pez_001No0.tsv --top 20
 alignment align-map mapping.csv srt_dir build/aligned --use-transcript-speakers --infer-missing-speakers --require-diarized-matches --min-match-ratio 0.2
 alignment export-corpus chunk.wav outputs/pez_001No0.srt outputs/pez_001No0.srt outputs/clips outputs/manifest.tsv
-alignment export-aligned-map build/align-map-wx-transcripts-srt-speakers hf-repo/cut_audio build/cut_samples --manifest build/cut_samples/manifest.tsv --require-diarized-matches --matched-only --min-match-ratio 0.2
-python tools/verify_export_manifest.py build/cut_samples/manifest.tsv --summary-root build/align-map-wx-transcripts-srt-speakers
+alignment export-aligned-map build/align-map-transcript-speakers-guarded hf-repo/cut_audio build/cut_samples-transcript-speakers --manifest build/cut_samples-transcript-speakers/manifest.tsv --require-diarized-matches --matched-only --min-match-ratio 0.2 --exclude-quality-failures build/align-map-transcript-speakers-guarded/quality_failures.tsv
+python tools/verify_export_manifest.py build/cut_samples-transcript-speakers/manifest.tsv --summary-root build/align-map-transcript-speakers-guarded --quality-failures build/align-map-transcript-speakers-guarded/quality_failures.tsv --check-files
 ```
 
 Write derived files under `build/` or `outputs/`. Keep files in `data/` as source fixtures.
+
+Verified final exports should use transcript-derived speaker labels, not WhisperX speaker codes. The
+current persisted outputs are:
+
+- `build/cut_samples-transcript-speakers`: PEZ clips verified against
+  `build/align-map-transcript-speakers-guarded`.
+- `build/cut_samples-indexed-transcript-speakers`: indexed `and`, `pom`, and `uht` clips verified
+  against `build/align-map-indexed-transcript-speakers-guarded`.
+
+`build/cut_samples-srt-speakers` is a baseline layout with SRT/WhisperX speakers and should not be
+treated as the final diarized corpus.
 
 ## Schemas
 

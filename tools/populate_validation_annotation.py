@@ -65,7 +65,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sample-csv", type=Path, default=Path("build/manual-validation-samples/set_b.csv"))
-    parser.add_argument("--cut-root", type=Path, default=Path("build/cut_samples-srt-speakers"))
+    parser.add_argument("--cut-root", type=Path, default=Path("build/cut_samples-transcript-speakers"))
     parser.add_argument("--project-root", type=Path, default=Path("validation_anno"))
     return parser.parse_args(argv)
 
