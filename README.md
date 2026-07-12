@@ -109,7 +109,8 @@ audio root or export job should cover only a subset.
 an optional `quality_failures.tsv`. It checks the manifest row count, rejects blank speakers,
 rejects leftover `[SPEAKER_*]` labels, and confirms that chunks excluded by quality audit are not
 present in final outputs. Use the same repeated `--corpus` filters as the export command when
-verifying a subset export.
+verifying a subset export. Add `--check-files` after real exports to verify that referenced audio
+and caption files exist and that caption files match the manifest text fields.
 
 `align-embeddings` is an optional side path for the old embedding experiment. It removes bracketed interviewer prompts, segments dialect text around pauses, and aligns segment pairs with a lazily loaded `sentence-transformers` model. It is not the default aligner, and normal parser/alignment tests do not require external models.
 

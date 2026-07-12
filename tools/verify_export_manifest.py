@@ -48,6 +48,7 @@ def manifest_failures(
     *,
     excluded_chunks: set[str],
     expected_rows: int | None = None,
+    check_files: bool = False,
 ) -> list[str]:
     """Return human-readable manifest invariant failures."""
     failures = []
@@ -64,6 +65,45 @@ def manifest_failures(
     )
     if failed_rows:
         failures.append(f"{failed_rows} manifest rows come from excluded quality-failure chunks")
+    if check_files:
+        failures.extend(file_failures(manifest_rows))
+    return failures
+
+
+def file_failures(manifest_rows: list[dict[str, str]]) -> list[str]:
+    """Return failures for missing or stale files referenced by the manifest."""
+    missing_audio = missing_text = stale_text = missing_original = stale_original = 0
+    for row in manifest_rows:
+        audio_value = row.get("audio_path", "")
+        audio_path = Path(audio_value)
+        if not audio_value or not audio_path.exists():
+            missing_audio += 1
+
+        text_value = row.get("text_path", "")
+        text_path = Path(text_value)
+        if not text_value or not text_path.exists():
+            missing_text += 1
+        elif text_path.read_text(encoding="utf-8") != row.get("text", ""):
+            stale_text += 1
+
+        original_value = row.get("text_original_path", "")
+        original_path = Path(original_value)
+        if not original_value or not original_path.exists():
+            missing_original += 1
+        elif original_path.read_text(encoding="utf-8") != row.get("text_original", ""):
+            stale_original += 1
+
+    failures = []
+    if missing_audio:
+        failures.append(f"{missing_audio} manifest audio files are missing")
+    if missing_text:
+        failures.append(f"{missing_text} manifest text files are missing")
+    if stale_text:
+        failures.append(f"{stale_text} manifest text files differ from manifest text")
+    if missing_original:
+        failures.append(f"{missing_original} manifest original-text files are missing")
+    if stale_original:
+        failures.append(f"{stale_original} manifest original-text files differ from manifest text_original")
     return failures
 
 
@@ -73,12 +113,18 @@ def verify_manifest(
     summary_root: Path | None = None,
     quality_failures: Path | None = None,
     corpora: set[str] | None = None,
+    check_files: bool = False,
 ) -> tuple[dict[str, int], list[str]]:
     """Verify an exported manifest and return metrics plus failures."""
     rows = read_tsv(manifest_path)
     excluded = failure_chunks(quality_failures)
     expected = expected_exported_rows(summary_root, excluded, corpora) if summary_root else None
-    failures = manifest_failures(rows, excluded_chunks=excluded, expected_rows=expected)
+    failures = manifest_failures(
+        rows,
+        excluded_chunks=excluded,
+        expected_rows=expected,
+        check_files=check_files,
+    )
     metrics = {
         "manifest_rows": len(rows),
         "excluded_chunks": len(excluded),
@@ -109,6 +155,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="append",
         help="Only count this corpus directory from --summary-root. May be repeated.",
     )
+    parser.add_argument(
+        "--check-files",
+        action="store_true",
+        help="Also verify referenced audio/text files exist and text files match manifest fields.",
+    )
     return parser.parse_args(argv)
 
 
@@ -120,6 +171,7 @@ def main(argv: list[str] | None = None) -> int:
         summary_root=args.summary_root,
         quality_failures=args.quality_failures,
         corpora=set(args.corpus) if args.corpus else None,
+        check_files=args.check_files,
     )
     for key, value in metrics.items():
         print(f"{key}\t{value}")

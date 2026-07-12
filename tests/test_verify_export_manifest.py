@@ -82,3 +82,46 @@ def test_verify_manifest_reports_counts_speakers_and_excluded_chunks(tmp_path: P
         "1 manifest rows keep WhisperX speaker codes",
         "1 manifest rows come from excluded quality-failure chunks",
     ]
+
+
+def test_verify_manifest_can_check_referenced_files(tmp_path: Path) -> None:
+    audio = tmp_path / "001_АБ.wav"
+    text = tmp_path / "001_АБ.txt"
+    original = tmp_path / "001_АБ_orig.txt"
+    audio.write_bytes(b"RIFF")
+    text.write_text("нормальный текст", encoding="utf-8")
+    original.write_text("норма\\льный текст", encoding="utf-8")
+    manifest = tmp_path / "manifest.tsv"
+    manifest.write_text(
+        "audio_path\ttext_path\ttext_original_path\tspeaker\ttext\ttext_original\n"
+        f"{audio}\t{text}\t{original}\t[АБ]:\tнормальный текст\tнорма\\льный текст\n",
+        encoding="utf-8",
+    )
+
+    _, failures_found = verify_manifest(manifest, check_files=True)
+
+    assert failures_found == []
+
+
+def test_verify_manifest_reports_missing_and_stale_referenced_files(tmp_path: Path) -> None:
+    text = tmp_path / "001_АБ.txt"
+    original = tmp_path / "001_АБ_orig.txt"
+    text.write_text("старый текст", encoding="utf-8")
+    original.write_text("старый оригинал", encoding="utf-8")
+    manifest = tmp_path / "manifest.tsv"
+    manifest.write_text(
+        "audio_path\ttext_path\ttext_original_path\tspeaker\ttext\ttext_original\n"
+        f"{tmp_path / 'missing.wav'}\t{text}\t{original}\t[АБ]:\tновый текст\tновый оригинал\n"
+        "\t\t\t[АБ]:\tеще текст\tеще оригинал\n",
+        encoding="utf-8",
+    )
+
+    _, failures_found = verify_manifest(manifest, check_files=True)
+
+    assert failures_found == [
+        "2 manifest audio files are missing",
+        "1 manifest text files are missing",
+        "1 manifest text files differ from manifest text",
+        "1 manifest original-text files are missing",
+        "1 manifest original-text files differ from manifest text_original",
+    ]
