@@ -31,6 +31,7 @@ alignment wer outputs/pez_001No0.tsv --top 20
 alignment align-map mapping.csv srt_dir build/aligned --use-transcript-speakers --infer-missing-speakers --require-diarized-matches --min-match-ratio 0.2
 alignment export-corpus chunk.wav outputs/pez_001No0.srt outputs/pez_001No0.srt outputs/clips outputs/manifest.tsv
 alignment export-aligned-map build/align-map-wx-transcripts-srt-speakers hf-repo/cut_audio build/cut_samples --manifest build/cut_samples/manifest.tsv --require-diarized-matches --matched-only --min-match-ratio 0.2
+python tools/verify_export_manifest.py build/cut_samples/manifest.tsv --summary-root build/align-map-wx-transcripts-srt-speakers
 ```
 
 Write derived files under `build/` or `outputs/`. Keep files in `data/` as source fixtures.
@@ -103,6 +104,12 @@ Add `--exclude-quality-failures build/aligned-with-speaker-maps/quality_failures
 already marked as missing, undiarized, or low-coverage by a speaker-map audit.
 Use repeated `--corpus` options when an aligned root contains multiple corpus directories but the
 audio root or export job should cover only a subset.
+
+`tools/verify_export_manifest.py` verifies the final exported manifest against `summary.tsv` and
+an optional `quality_failures.tsv`. It checks the manifest row count, rejects blank speakers,
+rejects leftover `[SPEAKER_*]` labels, and confirms that chunks excluded by quality audit are not
+present in final outputs. Use the same repeated `--corpus` filters as the export command when
+verifying a subset export.
 
 `align-embeddings` is an optional side path for the old embedding experiment. It removes bracketed interviewer prompts, segments dialect text around pauses, and aligns segment pairs with a lazily loaded `sentence-transformers` model. It is not the default aligner, and normal parser/alignment tests do not require external models.
 
