@@ -100,6 +100,26 @@ def test_align_map_uses_speaker_hint_only_for_rows_without_explicit_speakers(tmp
     assert summary[0]["matched_blank_speakers"] == "0"
 
 
+def test_align_map_cli_can_keep_editorial_notes_in_aligned_spans(tmp_path: Path) -> None:
+    mapping = tmp_path / "mapping.csv"
+    srt_dir = tmp_path / "srt"
+    output_dir = tmp_path / "out"
+    srt_dir.mkdir()
+    mapping.write_text(
+        'name,transcript\nchunk001.wav,"ручной [См. XIII-9 а.] ответ"\n',
+        encoding="utf-8",
+    )
+    (srt_dir / "chunk001.srt").write_text(
+        "1\n00:00:00,000 --> 00:00:01,000\n[SPEAKER_00]: ручной ответ\n",
+        encoding="utf-8",
+    )
+
+    main(["align-map", str(mapping), str(srt_dir), str(output_dir), "--keep-alignment-notes"])
+
+    rows = read_tsv(output_dir / "tables" / "chunk001.aligned.tsv")
+    assert rows[0]["transcript_text"] == "ручной [См. XIII-9 а.] ответ"
+
+
 def test_align_map_can_require_diarized_matched_segments(tmp_path: Path) -> None:
     mapping = tmp_path / "mapping.csv"
     srt_dir = tmp_path / "srt"

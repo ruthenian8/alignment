@@ -116,6 +116,7 @@ def align_mapping_table(
     use_transcript_speakers: bool = False,
     infer_missing_speakers: bool = False,
     allow_leading_transcript_skip: bool = True,
+    strip_notes: bool = True,
 ) -> list[dict[str, str]]:
     """Align every mapped transcript row to the SRT with the same chunk stem."""
     srt_root = Path(srt_dir)
@@ -166,6 +167,7 @@ def align_mapping_table(
             infer_missing_speakers=infer_missing_speakers,
             fallback_speaker=row_speaker_hint(row),
             allow_leading_transcript_skip=allow_leading_transcript_skip,
+            strip_notes=strip_notes,
         )
         write_aligned_tsv(stem, aligned, aligned_tsv_path)
         write_speaker_map(aligned, speaker_map_path)

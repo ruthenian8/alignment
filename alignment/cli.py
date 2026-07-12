@@ -28,6 +28,11 @@ def add_transcript_speaker_args(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Carry the last bracketed transcript speaker tag forward across following aligned segments.",
     )
+    parser.add_argument(
+        "--keep-alignment-notes",
+        action="store_true",
+        help="Keep editorial bracket notes in the transcript text used for alignment.",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -195,6 +200,7 @@ def main(argv: list[str] | None = None) -> None:
             infer_missing_speakers=args.infer_missing_speakers,
             fallback_speaker=args.speaker_hint.strip().strip("[]:"),
             allow_leading_transcript_skip=args.allow_leading_transcript_skip,
+            strip_notes=not args.keep_alignment_notes,
         )
         if args.output_tsv:
             write_aligned_tsv(args.index_name or args.srt.stem, aligned, args.output_tsv)
@@ -207,6 +213,7 @@ def main(argv: list[str] | None = None) -> None:
             args.output_dir,
             use_transcript_speakers=args.use_transcript_speakers,
             infer_missing_speakers=args.infer_missing_speakers,
+            strip_notes=not args.keep_alignment_notes,
         )
         if args.require_diarized_matches:
             errors = summary_quality_errors(summary, min_match_ratio=args.min_match_ratio)

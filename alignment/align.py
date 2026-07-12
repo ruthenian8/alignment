@@ -559,12 +559,14 @@ def align_srt_file(
     infer_missing_speakers: bool = False,
     fallback_speaker: str = "",
     allow_leading_transcript_skip: bool = False,
+    strip_notes: bool = True,
 ) -> list[AlignedSegment]:
     """Align one SRT file to transcript text and optionally write merged SRT."""
     alignment_transcript = (
         transcript_with_block_speaker_markers(transcript_text) if use_transcript_speakers else transcript_text
     )
-    alignment_transcript = remove_alignment_notes(alignment_transcript)
+    if strip_notes:
+        alignment_transcript = remove_alignment_notes(alignment_transcript)
     aligned = align_segments(
         parse_srt(Path(srt_path).read_text(encoding="utf-8-sig")),
         alignment_transcript,

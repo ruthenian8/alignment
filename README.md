@@ -79,6 +79,7 @@ Speaker recovery uses manual transcript evidence only. Explicit speaker markers 
 
 `align-map` also writes `summary.tsv`. Its `matched_blank_speakers` column is the primary audit field for diarization coverage: it should be zero when every successfully matched caption has a transcript-derived speaker. `match_ratio` records the share of SRT segments that matched manual transcript text for each chunk, so very low-coverage chunks can be treated as likely misaligned instead of trusted.
 Use `--require-diarized-matches` to make diarization coverage a CLI quality gate and to fail when any mapping row cannot be aligned to an SRT. Add `--min-match-ratio` when final outputs should also reject low-coverage chunk alignments.
+By default, alignment removes bracketed editorial/reference notes from recovered manual spans while preserving bracketed utterances and speaker evidence. Use `--keep-alignment-notes` on `align-srt` or `align-map` when auditing classifier behavior and original note placement.
 
 `manifest.tsv` columns:
 

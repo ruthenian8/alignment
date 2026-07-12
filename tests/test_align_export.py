@@ -50,6 +50,32 @@ def test_alignment_marks_skipped_segments_explicitly():
     assert aligned[0].transcript_text == ""
 
 
+def test_align_srt_file_strips_editorial_notes_by_default(tmp_path: Path):
+    srt_path = tmp_path / "chunk.srt"
+    srt_path.write_text(
+        "1\n00:00:00,000 --> 00:00:01,000\n[SPEAKER_00]: ручной ответ\n",
+        encoding="utf-8",
+    )
+
+    aligned = align_srt_file(srt_path, "ручной [См. XIII-9 а.] ответ")
+
+    assert aligned[0].matched is True
+    assert aligned[0].transcript_text == "ручной ответ"
+
+
+def test_align_srt_file_can_keep_editorial_notes_in_aligned_spans(tmp_path: Path):
+    srt_path = tmp_path / "chunk.srt"
+    srt_path.write_text(
+        "1\n00:00:00,000 --> 00:00:01,000\n[SPEAKER_00]: ручной ответ\n",
+        encoding="utf-8",
+    )
+
+    aligned = align_srt_file(srt_path, "ручной [См. XIII-9 а.] ответ", strip_notes=False)
+
+    assert aligned[0].matched is True
+    assert aligned[0].transcript_text == "ручной [См. XIII-9 а.] ответ"
+
+
 def test_alignment_can_skip_leading_manual_context():
     srt = parse_srt(
         """
