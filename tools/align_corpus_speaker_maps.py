@@ -271,7 +271,17 @@ def pez_jobs(hf_root: Path, raw_transcript_root: Path, output_root: Path) -> lis
     for mapping in sorted(hf_root.glob("pez_*/pez_*.csv")):
         name = mapping.parent.name
         srt_dir = mapping.parent
-        raw_transcript = raw_transcript_root / "pez" / f"{name}.txt"
+        raw_transcript = next(
+            (
+                path
+                for path in (
+                    raw_transcript_root / "pez" / f"{name}.txt",
+                    raw_transcript_root / f"{name}.txt",
+                )
+                if path.exists()
+            ),
+            raw_transcript_root / "pez" / f"{name}.txt",
+        )
         mapping = write_mapping_with_speaker_hints(
             mapping,
             raw_transcript,
