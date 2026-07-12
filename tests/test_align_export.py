@@ -589,23 +589,26 @@ def test_export_aligned_srt_tree_can_reject_low_match_ratio(tmp_path: Path):
     speaker_map_dir.mkdir(parents=True)
     audio_dir.mkdir(parents=True)
     (audio_dir / "and_001No1.wav").write_bytes(b"not real wav")
+    (audio_dir / "and_001No2.wav").write_bytes(b"not real wav")
     (aligned_root / "and_001" / "summary.tsv").write_text(
         "name\tsrt\tmanual\taligned_srt\taligned_tsv\tspeaker_map\tsegments\t"
         "matched_segments\tmatch_ratio\tblank_speakers\tmatched_blank_speakers\tstatus\n"
-        "and_001No1\t\t\t\t\t\t10\t1\t0.100\t9\t0\taligned\n",
+        "and_001No1\t\t\t\t\t\t10\t1\t0.100\t9\t0\taligned\n"
+        "and_001No2\t\t\t\t\t\t10\t1\t0.150\t9\t0\taligned\n",
         encoding="utf-8",
     )
-    (speaker_map_dir / "and_001No1.speaker_map.csv").write_text(
-        "srt_index,start,end,whisperx_speaker,transcript_speaker,speaker_source,matched,score\n"
-        '1,"00:00:00,031","00:00:01,250",[SPEAKER_00]:,[АБ]:,preceding_marker,True,1.000\n',
-        encoding="utf-8",
-    )
-    (aligned_dir / "and_001No1.aligned.srt").write_text(
-        "1\n00:00:00,031 --> 00:00:01,250\n[SPEAKER_00]: ручной текст\n",
-        encoding="utf-8",
-    )
+    for chunk in ["and_001No1", "and_001No2"]:
+        (speaker_map_dir / f"{chunk}.speaker_map.csv").write_text(
+            "srt_index,start,end,whisperx_speaker,transcript_speaker,speaker_source,matched,score\n"
+            '1,"00:00:00,031","00:00:01,250",[SPEAKER_00]:,[АБ]:,preceding_marker,True,1.000\n',
+            encoding="utf-8",
+        )
+        (aligned_dir / f"{chunk}.aligned.srt").write_text(
+            "1\n00:00:00,031 --> 00:00:01,250\n[SPEAKER_00]: ручной текст\n",
+            encoding="utf-8",
+        )
 
-    with pytest.raises(ValueError, match="below 0.200: and_001No1"):
+    with pytest.raises(ValueError, match="2 chunks below minimum match ratio 0.200"):
         export_aligned_srt_tree(
             aligned_root,
             audio_root,

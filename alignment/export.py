@@ -124,6 +124,13 @@ def apply_speaker_map(segments: list[SrtSegment], speakers: dict[int, str]) -> l
     ]
 
 
+def _sample(items: list[str], limit: int = 5) -> str:
+    sample = ", ".join(items[:limit])
+    if len(items) > limit:
+        sample += f", +{len(items) - limit} more"
+    return sample
+
+
 def _export_srt_segments(
     input_audio: Path | str,
     segments: list[SrtSegment],
@@ -252,25 +259,42 @@ def export_aligned_srt_tree(
     output_base = Path(output_root)
     rows = []
     ratio_cache: dict[str, dict[str, float]] = {}
+    aligned_files = []
     for aligned_srt in sorted(aligned_base.glob("*/aligned/*.aligned.srt")):
         corpus = aligned_srt.parent.parent.name
         if corpora is not None and corpus not in corpora:
             continue
-        chunk = aligned_srt.name.removesuffix(".aligned.srt")
-        audio_path = audio_base / corpus / f"{chunk}.wav"
-        if not audio_path.exists():
-            raise FileNotFoundError(f"Missing chunk audio for {aligned_srt}: {audio_path}")
-        if min_match_ratio > 0:
+        aligned_files.append((corpus, aligned_srt))
+
+    if min_match_ratio > 0:
+        missing_ratios = []
+        low_ratios = []
+        for corpus, aligned_srt in aligned_files:
+            chunk = aligned_srt.name.removesuffix(".aligned.srt")
             ratios = ratio_cache.setdefault(
                 corpus,
                 summary_match_ratios(aligned_base / corpus / "summary.tsv"),
             )
             if chunk not in ratios:
-                raise ValueError(f"Missing summary match ratio for {chunk}")
-            if ratios[chunk] < min_match_ratio:
-                raise ValueError(
-                    f"Alignment match ratio {ratios[chunk]:.3f} is below {min_match_ratio:.3f}: {chunk}"
+                missing_ratios.append(chunk)
+            elif ratios[chunk] < min_match_ratio:
+                low_ratios.append(f"{chunk}={ratios[chunk]:.3f}")
+        if missing_ratios or low_ratios:
+            parts = []
+            if missing_ratios:
+                parts.append(f"missing summary match ratio for {_sample(missing_ratios)}")
+            if low_ratios:
+                parts.append(
+                    f"{len(low_ratios)} chunks below minimum match ratio {min_match_ratio:.3f}: "
+                    f"{_sample(low_ratios)}"
                 )
+            raise ValueError("; ".join(parts))
+
+    for corpus, aligned_srt in aligned_files:
+        chunk = aligned_srt.name.removesuffix(".aligned.srt")
+        audio_path = audio_base / corpus / f"{chunk}.wav"
+        if not audio_path.exists():
+            raise FileNotFoundError(f"Missing chunk audio for {aligned_srt}: {audio_path}")
         speaker_map = aligned_base / corpus / "speaker_maps" / f"{chunk}.speaker_map.csv"
         if require_diarized_matches:
             if not speaker_map.exists():
