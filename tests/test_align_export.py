@@ -644,6 +644,47 @@ def test_export_aligned_srt_tree_can_reject_low_match_ratio(tmp_path: Path):
         )
 
 
+def test_export_aligned_srt_tree_can_exclude_quality_failures(tmp_path: Path):
+    aligned_root = tmp_path / "aligned-root"
+    audio_root = tmp_path / "audio"
+    aligned_dir = aligned_root / "and_001" / "aligned"
+    speaker_map_dir = aligned_root / "and_001" / "speaker_maps"
+    audio_dir = audio_root / "and_001"
+    aligned_dir.mkdir(parents=True)
+    speaker_map_dir.mkdir(parents=True)
+    audio_dir.mkdir(parents=True)
+    failures = tmp_path / "quality_failures.tsv"
+    failures.write_text(
+        "job\tname\treason\tvalue\tthreshold\tstatus\n"
+        "and_001\tand_001No2\tlow_match_ratio\t0.100\t0.200\taligned\n",
+        encoding="utf-8",
+    )
+    for chunk in ["and_001No1", "and_001No2"]:
+        (audio_dir / f"{chunk}.wav").write_bytes(b"not real wav")
+        (speaker_map_dir / f"{chunk}.speaker_map.csv").write_text(
+            "srt_index,start,end,whisperx_speaker,transcript_speaker,speaker_source,matched,score\n"
+            '1,"00:00:00,031","00:00:01,250",[SPEAKER_00]:,[АБ]:,preceding_marker,True,1.000\n',
+            encoding="utf-8",
+        )
+        (aligned_dir / f"{chunk}.aligned.srt").write_text(
+            "1\n00:00:00,031 --> 00:00:01,250\n[SPEAKER_00]: ручной текст\n",
+            encoding="utf-8",
+        )
+
+    rows = export_aligned_srt_tree(
+        aligned_root,
+        audio_root,
+        tmp_path / "cut_samples",
+        exclude_quality_failures=failures,
+        run=False,
+    )
+
+    assert [row["audio_path"] for row in rows] == [
+        str(tmp_path / "cut_samples" / "and_001" / "and_001No1" / "001_АБ_00-00-00-031.wav")
+    ]
+    assert not (tmp_path / "cut_samples" / "and_001" / "and_001No2").exists()
+
+
 def test_summary_match_ratios_falls_back_to_matched_segment_counts(tmp_path: Path):
     summary = tmp_path / "summary.tsv"
     summary.write_text(
@@ -788,4 +829,48 @@ def test_export_aligned_map_cli_can_filter_corpus_from_mixed_root(tmp_path: Path
         )
 
     assert (output_root / "and_001" / "and_001No1" / "001_АБ_00-00-00-031.txt").exists()
+
+
+def test_export_aligned_map_cli_can_exclude_quality_failures(tmp_path: Path):
+    aligned_root = tmp_path / "aligned-root"
+    audio_root = tmp_path / "audio"
+    output_root = tmp_path / "cut_samples"
+    failures = tmp_path / "quality_failures.tsv"
+    failures.write_text(
+        "job\tname\treason\tvalue\tthreshold\tstatus\n"
+        "and_001\tand_001No2\tlow_match_ratio\t0.100\t0.200\taligned\n",
+        encoding="utf-8",
+    )
+    for chunk in ["and_001No1", "and_001No2"]:
+        aligned_dir = aligned_root / "and_001" / "aligned"
+        speaker_map_dir = aligned_root / "and_001" / "speaker_maps"
+        audio_dir = audio_root / "and_001"
+        aligned_dir.mkdir(parents=True, exist_ok=True)
+        speaker_map_dir.mkdir(parents=True, exist_ok=True)
+        audio_dir.mkdir(parents=True, exist_ok=True)
+        (audio_dir / f"{chunk}.wav").write_bytes(b"not real wav")
+        (speaker_map_dir / f"{chunk}.speaker_map.csv").write_text(
+            "srt_index,start,end,whisperx_speaker,transcript_speaker,speaker_source,matched,score\n"
+            '1,"00:00:00,031","00:00:01,250",[SPEAKER_00]:,[АБ]:,preceding_marker,True,1.000\n',
+            encoding="utf-8",
+        )
+        (aligned_dir / f"{chunk}.aligned.srt").write_text(
+            "1\n00:00:00,031 --> 00:00:01,250\n[SPEAKER_00]: текст\n",
+            encoding="utf-8",
+        )
+
+    with patch("alignment.export.subprocess.run"):
+        main(
+            [
+                "export-aligned-map",
+                str(aligned_root),
+                str(audio_root),
+                str(output_root),
+                "--exclude-quality-failures",
+                str(failures),
+            ]
+        )
+
+    assert (output_root / "and_001" / "and_001No1" / "001_АБ_00-00-00-031.txt").exists()
+    assert not (output_root / "and_001" / "and_001No2").exists()
     assert not (output_root / "pez_001").exists()

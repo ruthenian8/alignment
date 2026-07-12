@@ -144,6 +144,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=0.0,
         help="Fail chunks whose align-map summary match ratio is lower.",
     )
+    export_aligned.add_argument(
+        "--exclude-quality-failures",
+        type=Path,
+        help="Skip chunks listed in a quality_failures.tsv file from a corpus speaker-map audit.",
+    )
 
     align_embeddings = subparsers.add_parser(
         "align-embeddings",
@@ -231,6 +236,7 @@ def main(argv: list[str] | None = None) -> None:
             require_diarized_matches=args.require_diarized_matches,
             matched_only=args.matched_only,
             min_match_ratio=args.min_match_ratio,
+            exclude_quality_failures=args.exclude_quality_failures,
         )
     elif args.command == "align-embeddings":
         extraction = extract_dialect_text(

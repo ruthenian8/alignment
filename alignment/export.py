@@ -88,6 +88,17 @@ def speaker_map_matched_indices(path: Path) -> set[int]:
     return matched_indices
 
 
+def quality_failure_chunks(path: Path | str) -> set[str]:
+    """Read chunk names that failed a corpus-level quality audit."""
+    chunks = set()
+    with Path(path).open(encoding="utf-8-sig", newline="") as file:
+        for row in csv.DictReader(file, delimiter="\t"):
+            name = row.get("name", "").strip()
+            if name:
+                chunks.add(name)
+    return chunks
+
+
 def summary_match_ratios(path: Path) -> dict[str, float]:
     """Read per-chunk alignment match ratios from an align-map summary."""
     ratios = {}
@@ -251,6 +262,7 @@ def export_aligned_srt_tree(
     require_diarized_matches: bool = False,
     matched_only: bool = False,
     min_match_ratio: float = 0.0,
+    exclude_quality_failures: Path | str | None = None,
     run: bool = True,
 ) -> list[dict[str, str]]:
     """Export a tree of ``corpus/aligned/*.aligned.srt`` files like ``cut_samples``."""
@@ -259,10 +271,13 @@ def export_aligned_srt_tree(
     output_base = Path(output_root)
     rows = []
     ratio_cache: dict[str, dict[str, float]] = {}
+    excluded_chunks = quality_failure_chunks(exclude_quality_failures) if exclude_quality_failures else set()
     aligned_files = []
     for aligned_srt in sorted(aligned_base.glob("*/aligned/*.aligned.srt")):
         corpus = aligned_srt.parent.parent.name
         if corpora is not None and corpus not in corpora:
+            continue
+        if aligned_srt.name.removesuffix(".aligned.srt") in excluded_chunks:
             continue
         aligned_files.append((corpus, aligned_srt))
 

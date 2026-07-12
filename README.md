@@ -99,6 +99,8 @@ or if a required speaker map is missing. By default, export preserves all aligne
 unmatched rows that fall back to the original SRT text. Add `--matched-only` to export only rows that
 were matched to manual transcript text. Add `--min-match-ratio` to make export re-check the
 `align-map` summary and fail low-coverage chunks even if the alignment stage was run without a gate.
+Add `--exclude-quality-failures build/aligned-with-speaker-maps/quality_failures.tsv` to skip chunks
+already marked as missing, undiarized, or low-coverage by a speaker-map audit.
 Use repeated `--corpus` options when an aligned root contains multiple corpus directories but the
 audio root or export job should cover only a subset.
 
