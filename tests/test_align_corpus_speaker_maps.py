@@ -3,7 +3,12 @@
 import csv
 from pathlib import Path
 
-from tools.align_corpus_speaker_maps import best_block_speaker, pez_jobs, text_blocks_with_speakers
+from tools.align_corpus_speaker_maps import (
+    best_block_speaker,
+    format_quality_failures,
+    pez_jobs,
+    text_blocks_with_speakers,
+)
 
 
 def test_best_block_speaker_tolerates_small_transcript_differences():
@@ -40,3 +45,9 @@ def test_pez_jobs_accepts_flat_raw_transcript_root(tmp_path: Path) -> None:
     with jobs[0][1].open(encoding="utf-8") as file:
         rows = list(csv.DictReader(file))
     assert rows[0]["speaker_hint"] == "ААК"
+
+
+def test_format_quality_failures_caps_batch_output() -> None:
+    message = format_quality_failures([f"pez_{index:03}: low coverage" for index in range(7)], limit=3)
+
+    assert message == "pez_000: low coverage; pez_001: low coverage; pez_002: low coverage; +4 more"

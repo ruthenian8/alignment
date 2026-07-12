@@ -317,6 +317,14 @@ def indexed_jobs(
     return jobs
 
 
+def format_quality_failures(failures: list[str], limit: int = 5) -> str:
+    """Return a compact batch quality-gate failure message."""
+    message = "; ".join(failures[:limit])
+    if len(failures) > limit:
+        message += f"; +{len(failures) - limit} more"
+    return message
+
+
 def main(argv: list[str] | None = None) -> int:
     """Align selected corpora and write alignment-time speaker maps."""
     args = parse_args(argv)
@@ -332,6 +340,7 @@ def main(argv: list[str] | None = None) -> int:
         jobs = [job for job in jobs if job[0] in names]
 
     aligned = missing = 0
+    quality_failures: list[str] = []
     for name, mapping, srt_dir in jobs:
         print(f"{name}: aligning {mapping} against {srt_dir}", flush=True)
         summary = align_mapping_table(
@@ -344,12 +353,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.require_diarized_matches:
             errors = summary_quality_errors(summary, min_match_ratio=args.min_match_ratio)
             if errors:
-                raise SystemExit(f"{name}: {'; '.join(errors)}")
+                quality_failures.append(f"{name}: {'; '.join(errors)}")
         aligned += sum(row["status"] == "aligned" for row in summary)
         missing += sum(row["status"] != "aligned" for row in summary)
         print(f"{name}: {aligned} aligned so far, {missing} missing so far", flush=True)
 
     print(f"processed {len(jobs)} mapping tables; aligned {aligned}; missing {missing}", flush=True)
+    if quality_failures:
+        raise SystemExit(format_quality_failures(quality_failures))
     return 0
 
 
