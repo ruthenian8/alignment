@@ -7,6 +7,7 @@ from tools.align_corpus_speaker_maps import (
     best_block_speaker,
     format_quality_failures,
     pez_jobs,
+    quality_failure_rows,
     text_blocks_with_speakers,
 )
 
@@ -51,3 +52,60 @@ def test_format_quality_failures_caps_batch_output() -> None:
     message = format_quality_failures([f"pez_{index:03}: low coverage" for index in range(7)], limit=3)
 
     assert message == "pez_000: low coverage; pez_001: low coverage; pez_002: low coverage; +4 more"
+
+
+def test_quality_failure_rows_are_row_level_and_typed() -> None:
+    rows = quality_failure_rows(
+        "pom_001",
+        [
+            {
+                "name": "pom_001No1",
+                "status": "missing_srt",
+                "segments": "0",
+                "match_ratio": "0.000",
+                "matched_blank_speakers": "0",
+            },
+            {
+                "name": "pom_001No2",
+                "status": "aligned",
+                "segments": "10",
+                "match_ratio": "0.100",
+                "matched_blank_speakers": "2",
+            },
+            {
+                "name": "pom_001No3",
+                "status": "aligned",
+                "segments": "10",
+                "match_ratio": "0.900",
+                "matched_blank_speakers": "0",
+            },
+        ],
+        min_match_ratio=0.2,
+    )
+
+    assert rows == [
+        {
+            "job": "pom_001",
+            "name": "pom_001No1",
+            "reason": "missing_srt",
+            "value": "",
+            "threshold": "",
+            "status": "missing_srt",
+        },
+        {
+            "job": "pom_001",
+            "name": "pom_001No2",
+            "reason": "matched_blank_speakers",
+            "value": "2",
+            "threshold": "0",
+            "status": "aligned",
+        },
+        {
+            "job": "pom_001",
+            "name": "pom_001No2",
+            "reason": "low_match_ratio",
+            "value": "0.100",
+            "threshold": "0.200",
+            "status": "aligned",
+        },
+    ]

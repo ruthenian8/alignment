@@ -18,6 +18,7 @@ from alignment.mapping import align_mapping_table, summary_quality_errors  # noq
 from alignment.reorder import normalize_for_match  # noqa: E402
 
 INDEXED_CORPORA = ("and", "pom", "uht")
+QUALITY_FAILURE_COLUMNS = ["job", "name", "reason", "value", "threshold", "status"]
 LATIN_INITIALS = {
     "a": "А",
     "b": "Б",
@@ -325,6 +326,63 @@ def format_quality_failures(failures: list[str], limit: int = 5) -> str:
     return message
 
 
+def quality_failure_rows(
+    job: str, summary: list[dict[str, str]], *, min_match_ratio: float = 0.0
+) -> list[dict[str, str]]:
+    """Return row-level quality gate failures for a mapping summary."""
+    rows = []
+    for row in summary:
+        name = row.get("name", "")
+        status = row.get("status", "")
+        if status != "aligned":
+            rows.append(
+                {
+                    "job": job,
+                    "name": name,
+                    "reason": status or "not_aligned",
+                    "value": "",
+                    "threshold": "",
+                    "status": status,
+                }
+            )
+            continue
+        matched_blank = int(row.get("matched_blank_speakers", "0") or 0)
+        if matched_blank:
+            rows.append(
+                {
+                    "job": job,
+                    "name": name,
+                    "reason": "matched_blank_speakers",
+                    "value": str(matched_blank),
+                    "threshold": "0",
+                    "status": status,
+                }
+            )
+        segments = int(row.get("segments", "0") or 0)
+        match_ratio = float(row.get("match_ratio", "0") or 0)
+        if min_match_ratio > 0 and segments > 0 and match_ratio < min_match_ratio:
+            rows.append(
+                {
+                    "job": job,
+                    "name": name,
+                    "reason": "low_match_ratio",
+                    "value": f"{match_ratio:.3f}",
+                    "threshold": f"{min_match_ratio:.3f}",
+                    "status": status,
+                }
+            )
+    return rows
+
+
+def write_quality_failures(path: Path, rows: list[dict[str, str]]) -> None:
+    """Write batch quality failures to a TSV file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=QUALITY_FAILURE_COLUMNS, delimiter="\t")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Align selected corpora and write alignment-time speaker maps."""
     args = parse_args(argv)
@@ -341,6 +399,7 @@ def main(argv: list[str] | None = None) -> int:
 
     aligned = missing = 0
     quality_failures: list[str] = []
+    quality_rows: list[dict[str, str]] = []
     for name, mapping, srt_dir in jobs:
         print(f"{name}: aligning {mapping} against {srt_dir}", flush=True)
         summary = align_mapping_table(
@@ -354,11 +413,14 @@ def main(argv: list[str] | None = None) -> int:
             errors = summary_quality_errors(summary, min_match_ratio=args.min_match_ratio)
             if errors:
                 quality_failures.append(f"{name}: {'; '.join(errors)}")
+            quality_rows.extend(quality_failure_rows(name, summary, min_match_ratio=args.min_match_ratio))
         aligned += sum(row["status"] == "aligned" for row in summary)
         missing += sum(row["status"] != "aligned" for row in summary)
         print(f"{name}: {aligned} aligned so far, {missing} missing so far", flush=True)
 
     print(f"processed {len(jobs)} mapping tables; aligned {aligned}; missing {missing}", flush=True)
+    if args.require_diarized_matches:
+        write_quality_failures(args.output_root / "quality_failures.tsv", quality_rows)
     if quality_failures:
         raise SystemExit(format_quality_failures(quality_failures))
     return 0
