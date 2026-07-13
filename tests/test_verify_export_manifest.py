@@ -125,3 +125,33 @@ def test_verify_manifest_reports_missing_and_stale_referenced_files(tmp_path: Pa
         "1 manifest original-text files are missing",
         "1 manifest original-text files differ from manifest text_original",
     ]
+
+
+def test_verify_manifest_reports_kept_summary_quality_failures(tmp_path: Path) -> None:
+    summary_root = tmp_path / "aligned"
+    summary_dir = summary_root / "and_001"
+    summary_dir.mkdir(parents=True)
+    (summary_dir / "summary.tsv").write_text(
+        "name\tsegments\tmatched_segments\tmatch_ratio\tmatched_blank_speakers\tstatus\n"
+        "and_001No1\t2\t2\t0.100\t1\taligned\n",
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "manifest.tsv"
+    manifest.write_text(
+        "audio_path\tspeaker\n"
+        "/tmp/out/and_001/and_001No1/001_АБ.wav\t[АБ]:\n"
+        "/tmp/out/and_001/and_001No1/002_АБ.wav\t[АБ]:\n",
+        encoding="utf-8",
+    )
+
+    _, failures_found = verify_manifest(
+        manifest,
+        summary_root=summary_root,
+        corpora={"and_001"},
+        min_match_ratio=0.2,
+    )
+
+    assert failures_found == [
+        "1 kept matched summary rows have blank transcript speakers",
+        "1 kept chunks are below minimum match ratio 0.200: and_001No1=0.100",
+    ]

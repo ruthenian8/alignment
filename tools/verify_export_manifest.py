@@ -31,16 +31,44 @@ def summary_rows(summary_root: Path, corpora: set[str] | None = None) -> list[di
     return rows
 
 
-def expected_exported_rows(
-    summary_root: Path, excluded_chunks: set[str], corpora: set[str] | None = None
-) -> int:
-    """Return matched aligned rows excluding known quality-failure chunks."""
-    total = 0
-    for row in summary_rows(summary_root, corpora):
+def summary_failures(
+    rows: list[dict[str, str]],
+    *,
+    excluded_chunks: set[str],
+    min_match_ratio: float = 0.0,
+) -> list[str]:
+    """Return failures for kept aligned chunks that do not meet final-output quality."""
+    matched_blank = 0
+    low_match = []
+    for row in rows:
         if row.get("name") in excluded_chunks:
             continue
-        total += int(row.get("matched_segments", "0") or 0)
-    return total
+        matched_blank += int(row.get("matched_blank_speakers", "0") or 0)
+        ratio_text = row.get("match_ratio", "")
+        if min_match_ratio > 0 and ratio_text:
+            try:
+                ratio = float(ratio_text)
+            except ValueError:
+                ratio = 0.0
+            if ratio < min_match_ratio:
+                low_match.append(f"{row.get('name', '<unknown>')}={ratio:.3f}")
+    failures = []
+    if matched_blank:
+        failures.append(f"{matched_blank} kept matched summary rows have blank transcript speakers")
+    if low_match:
+        failures.append(
+            f"{len(low_match)} kept chunks are below minimum match ratio {min_match_ratio:.3f}: "
+            f"{sample(low_match)}"
+        )
+    return failures
+
+
+def sample(items: list[str], limit: int = 5) -> str:
+    """Return a compact sample of failure labels."""
+    text = ", ".join(items[:limit])
+    if len(items) > limit:
+        text += f", +{len(items) - limit} more"
+    return text
 
 
 def manifest_failures(
@@ -114,17 +142,27 @@ def verify_manifest(
     quality_failures: Path | None = None,
     corpora: set[str] | None = None,
     check_files: bool = False,
+    min_match_ratio: float = 0.0,
 ) -> tuple[dict[str, int], list[str]]:
     """Verify an exported manifest and return metrics plus failures."""
     rows = read_tsv(manifest_path)
     excluded = failure_chunks(quality_failures)
-    expected = expected_exported_rows(summary_root, excluded, corpora) if summary_root else None
+    summaries = summary_rows(summary_root, corpora) if summary_root else []
+    expected = None
+    if summary_root:
+        expected = sum(
+            int(row.get("matched_segments", "0") or 0) for row in summaries if row.get("name") not in excluded
+        )
     failures = manifest_failures(
         rows,
         excluded_chunks=excluded,
         expected_rows=expected,
         check_files=check_files,
     )
+    if summary_root:
+        failures.extend(
+            summary_failures(summaries, excluded_chunks=excluded, min_match_ratio=min_match_ratio)
+        )
     metrics = {
         "manifest_rows": len(rows),
         "excluded_chunks": len(excluded),
@@ -160,6 +198,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Also verify referenced audio/text files exist and text files match manifest fields.",
     )
+    parser.add_argument(
+        "--min-match-ratio",
+        type=float,
+        default=0.0,
+        help="Reject kept summary rows whose match_ratio is below this threshold.",
+    )
     return parser.parse_args(argv)
 
 
@@ -172,6 +216,7 @@ def main(argv: list[str] | None = None) -> int:
         quality_failures=args.quality_failures,
         corpora=set(args.corpus) if args.corpus else None,
         check_files=args.check_files,
+        min_match_ratio=args.min_match_ratio,
     )
     for key, value in metrics.items():
         print(f"{key}\t{value}")
