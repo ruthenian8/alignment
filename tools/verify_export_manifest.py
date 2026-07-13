@@ -135,6 +135,58 @@ def file_failures(manifest_rows: list[dict[str, str]]) -> list[str]:
     return failures
 
 
+def parse_bool(value: str) -> bool:
+    """Parse common CSV boolean values."""
+    return value.strip().lower() in {"true", "1", "yes", "y"}
+
+
+def speaker_map_failures(manifest_rows: list[dict[str, str]]) -> list[str]:
+    """Return failures for missing or inconsistent exported speaker-map provenance."""
+    maps: dict[Path, dict[str, dict[str, str]] | None] = {}
+    missing_maps = missing_rows = mismatched_speakers = unmatched_rows = 0
+    for row in manifest_rows:
+        audio_value = row.get("audio_path", "")
+        clip_id = row.get("clip_id", "")
+        if not audio_value or not clip_id:
+            missing_maps += 1
+            continue
+
+        map_path = Path(audio_value).parent / "speaker_map.csv"
+        if map_path not in maps:
+            if not map_path.exists():
+                maps[map_path] = None
+            else:
+                with map_path.open(encoding="utf-8-sig", newline="") as file:
+                    maps[map_path] = {
+                        row["srt_index"]: row for row in csv.DictReader(file) if row.get("srt_index")
+                    }
+        speaker_rows = maps[map_path]
+        if speaker_rows is None:
+            missing_maps += 1
+            continue
+
+        srt_index = clip_id.split("_", 1)[0].lstrip("0") or "0"
+        speaker_row = speaker_rows.get(srt_index)
+        if speaker_row is None:
+            missing_rows += 1
+            continue
+        if not parse_bool(speaker_row.get("matched", "")):
+            unmatched_rows += 1
+        if speaker_row.get("transcript_speaker", "").strip() != row.get("speaker", "").strip():
+            mismatched_speakers += 1
+
+    failures = []
+    if missing_maps:
+        failures.append(f"{missing_maps} manifest rows have no speaker-map provenance file")
+    if missing_rows:
+        failures.append(f"{missing_rows} manifest rows are absent from speaker-map provenance")
+    if unmatched_rows:
+        failures.append(f"{unmatched_rows} manifest rows point to unmatched speaker-map rows")
+    if mismatched_speakers:
+        failures.append(f"{mismatched_speakers} manifest speakers differ from speaker-map provenance")
+    return failures
+
+
 def verify_manifest(
     manifest_path: Path,
     *,
@@ -143,6 +195,7 @@ def verify_manifest(
     corpora: set[str] | None = None,
     check_files: bool = False,
     min_match_ratio: float = 0.0,
+    check_speaker_maps: bool = False,
 ) -> tuple[dict[str, int], list[str]]:
     """Verify an exported manifest and return metrics plus failures."""
     rows = read_tsv(manifest_path)
@@ -163,6 +216,8 @@ def verify_manifest(
         failures.extend(
             summary_failures(summaries, excluded_chunks=excluded, min_match_ratio=min_match_ratio)
         )
+    if check_speaker_maps:
+        failures.extend(speaker_map_failures(rows))
     metrics = {
         "manifest_rows": len(rows),
         "excluded_chunks": len(excluded),
@@ -204,6 +259,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=0.0,
         help="Reject kept summary rows whose match_ratio is below this threshold.",
     )
+    parser.add_argument(
+        "--check-speaker-maps",
+        action="store_true",
+        help="Verify exported speaker_map.csv files exist and agree with manifest speakers.",
+    )
     return parser.parse_args(argv)
 
 
@@ -217,6 +277,7 @@ def main(argv: list[str] | None = None) -> int:
         corpora=set(args.corpus) if args.corpus else None,
         check_files=args.check_files,
         min_match_ratio=args.min_match_ratio,
+        check_speaker_maps=args.check_speaker_maps,
     )
     for key, value in metrics.items():
         print(f"{key}\t{value}")

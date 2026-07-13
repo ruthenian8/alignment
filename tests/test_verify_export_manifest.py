@@ -155,3 +155,49 @@ def test_verify_manifest_reports_kept_summary_quality_failures(tmp_path: Path) -
         "1 kept matched summary rows have blank transcript speakers",
         "1 kept chunks are below minimum match ratio 0.200: and_001No1=0.100",
     ]
+
+
+def test_verify_manifest_can_check_speaker_map_provenance(tmp_path: Path) -> None:
+    chunk = tmp_path / "and_001" / "and_001No1"
+    chunk.mkdir(parents=True)
+    (chunk / "speaker_map.csv").write_text(
+        "srt_index,start,end,whisperx_speaker,transcript_speaker,speaker_source,matched,score\n"
+        "1,00:00:00,00:00:01,[SPEAKER_00]:,[АБ]:,preceding_marker,True,1.000\n",
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "manifest.tsv"
+    manifest.write_text(
+        f"clip_id\taudio_path\tspeaker\n001_АБ_00-00-00-000\t{chunk / '001_АБ_00-00-00-000.wav'}\t[АБ]:\n",
+        encoding="utf-8",
+    )
+
+    _, failures_found = verify_manifest(manifest, check_speaker_maps=True)
+
+    assert failures_found == []
+
+
+def test_verify_manifest_reports_speaker_map_provenance_failures(tmp_path: Path) -> None:
+    chunk = tmp_path / "and_001" / "and_001No1"
+    chunk.mkdir(parents=True)
+    (chunk / "speaker_map.csv").write_text(
+        "srt_index,start,end,whisperx_speaker,transcript_speaker,speaker_source,matched,score\n"
+        "1,00:00:00,00:00:01,[SPEAKER_00]:,[ВГ]:,preceding_marker,False,1.000\n",
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "manifest.tsv"
+    manifest.write_text(
+        "clip_id\taudio_path\tspeaker\n"
+        f"001_АБ_00-00-00-000\t{chunk / '001_АБ_00-00-00-000.wav'}\t[АБ]:\n"
+        f"002_АБ_00-00-01-000\t{chunk / '002_АБ_00-00-01-000.wav'}\t[АБ]:\n"
+        f"003_АБ_00-00-02-000\t{tmp_path / 'missing' / '003_АБ.wav'}\t[АБ]:\n",
+        encoding="utf-8",
+    )
+
+    _, failures_found = verify_manifest(manifest, check_speaker_maps=True)
+
+    assert failures_found == [
+        "1 manifest rows have no speaker-map provenance file",
+        "1 manifest rows are absent from speaker-map provenance",
+        "1 manifest rows point to unmatched speaker-map rows",
+        "1 manifest speakers differ from speaker-map provenance",
+    ]
