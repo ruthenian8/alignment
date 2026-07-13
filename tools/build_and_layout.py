@@ -16,12 +16,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from alignment.audio import build_cut_command, ffprobe_duration
-from alignment.index_parser import parse_index_file
-from alignment.io import INDEX_COLUMNS, TRANSCRIPT_COLUMNS, write_tsv
-from alignment.srt import timestamp_to_ms
-from alignment.transcript_parser import parse_transcript_file
-
+from alignment.audio import build_cut_command, ffprobe_duration  # noqa: E402
+from alignment.index_parser import parse_index_file  # noqa: E402
+from alignment.io import INDEX_COLUMNS, TRANSCRIPT_COLUMNS, write_tsv  # noqa: E402
+from alignment.srt import timestamp_to_ms  # noqa: E402
+from alignment.transcript_parser import parse_transcript_file  # noqa: E402
 
 MAPPING_PATH = ROOT / "mapping2.txt"
 RAW_AUDIO_INDEX_ROOT = ROOT / "raw_audio_plus_indices" / "and"
@@ -91,7 +90,9 @@ def copy_inputs(recording: Recording, manifest_rows: list[dict[str, str]]) -> tu
     return audio_output, index_output, transcript_output
 
 
-def write_tables(recording: Recording, index_path: Path, transcript_path: Path | None) -> list[dict[str, str]]:
+def write_tables(
+    recording: Recording, index_path: Path, transcript_path: Path | None
+) -> list[dict[str, str]]:
     """Write parsed index and transcript TSV tables."""
     index_rows = parse_index_file(index_path, audio_stem=recording.target)
     write_tsv(OUTPUT_ROOT / "index_tables" / f"{recording.target}.tsv", index_rows, INDEX_COLUMNS)
@@ -106,7 +107,9 @@ def write_tables(recording: Recording, index_path: Path, transcript_path: Path |
     return index_rows
 
 
-def cut_index_audio(recording: Recording, audio_path: Path, index_rows: list[dict[str, str]]) -> list[dict[str, str]]:
+def cut_index_audio(
+    recording: Recording, audio_path: Path, index_rows: list[dict[str, str]]
+) -> list[dict[str, str]]:
     """Cut one source recording into index-defined WAV chunks."""
     duration = ffprobe_duration(audio_path)
     clip_rows: list[dict[str, str]] = []
@@ -115,7 +118,9 @@ def cut_index_audio(recording: Recording, audio_path: Path, index_rows: list[dic
 
     for index, row in enumerate(index_rows):
         start = row["start"]
-        end = index_rows[index + 1]["start"] if index + 1 < len(index_rows) else seconds_to_timestamp(duration)
+        end = (
+            index_rows[index + 1]["start"] if index + 1 < len(index_rows) else seconds_to_timestamp(duration)
+        )
         output_path = output_dir / row["name"]
         command = build_cut_command(audio_path, output_path, start, end)
         subprocess.run(command, check=True)
@@ -168,7 +173,9 @@ def verify_clips(recording: Recording, clip_rows: list[dict[str, str]]) -> list[
     return rows
 
 
-def summarize_verification(recording: Recording, audio_path: Path, clip_rows: list[dict[str, str]]) -> dict[str, str]:
+def summarize_verification(
+    recording: Recording, audio_path: Path, clip_rows: list[dict[str, str]]
+) -> dict[str, str]:
     """Summarize source duration against the indexed span covered by clips."""
     source_duration = ffprobe_duration(audio_path)
     first_start = timestamp_to_ms(clip_rows[0]["start"]) / 1000 if clip_rows else 0.0

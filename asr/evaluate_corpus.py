@@ -387,7 +387,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "input_dir", type=Path, help="Corpus root containing .wav files with sibling .txt files."
     )
-    parser.add_argument("output_dir", type=Path, help="Directory for manifest, predictions, and evaluation outputs.")
+    parser.add_argument(
+        "output_dir", type=Path, help="Directory for manifest, predictions, and evaluation outputs."
+    )
     parser.add_argument("--glob", default="*.wav", help="Recursive audio glob under input_dir.")
     parser.add_argument("--predictions", type=Path, help="Existing .jsonl or .csv predictions to evaluate.")
     parser.add_argument(

@@ -15,7 +15,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
-
 AUDIO_EXTENSIONS = {".aac", ".flac", ".m4a", ".mp3", ".ogg", ".wav", ".wma"}
 
 
@@ -287,7 +286,9 @@ def main() -> None:
     )
     parser.add_argument("--dry-run", action="store_true", help="Only write the manifest; do not run ffmpeg.")
     parser.add_argument("--overwrite", action="store_true", help="Replace existing normalized WAV files.")
-    parser.add_argument("--jobs", type=int, default=4, help="Number of ffmpeg conversions to run concurrently.")
+    parser.add_argument(
+        "--jobs", type=int, default=4, help="Number of ffmpeg conversions to run concurrently."
+    )
     args = parser.parse_args()
 
     process(

@@ -8,7 +8,6 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-
 WORD_RE = re.compile(r"[\w+]+", re.UNICODE)
 
 
@@ -307,7 +306,8 @@ def markdown_summary(exact: dict[str, object], fuzzy: dict[str, object]) -> str:
     lines = [
         "# TextGrid Boundary Evaluation",
         "",
-        "| word matching | files | missing files | ref words | pred words | matched words | Alignment Accuracy (%) | left acc | right acc | middle acc | recall | precision |",
+        "| word matching | files | missing files | ref words | pred words | matched words | "
+        "Alignment Accuracy (%) | left acc | right acc | middle acc | recall | precision |",
         "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for label, summary in (("exact", exact), ("fuzzy_ed1", fuzzy)):
@@ -385,7 +385,10 @@ def main() -> None:
     write_csv(args.output_dir / "file_metrics_fuzzy_ed1.csv", fuzzy_files)
     write_csv(args.output_dir / "word_metrics_fuzzy_ed1.csv", fuzzy_words)
     write_csv(args.output_dir / "missing_fuzzy_ed1.csv", fuzzy_missing)
-    write_csv(args.output_dir / "summary.csv", [exact_summary | {"word_matching": "exact"}, fuzzy_summary | {"word_matching": "fuzzy_ed1"}])
+    write_csv(
+        args.output_dir / "summary.csv",
+        [exact_summary | {"word_matching": "exact"}, fuzzy_summary | {"word_matching": "fuzzy_ed1"}],
+    )
     summary_md = markdown_summary(exact_summary, fuzzy_summary)
     (args.output_dir / "summary.md").write_text(summary_md, encoding="utf-8")
     print(summary_md)
