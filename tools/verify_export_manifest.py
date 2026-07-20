@@ -161,9 +161,12 @@ def parse_bool(value: str) -> bool:
     return value.strip().lower() in {"true", "1", "yes", "y"}
 
 
-def speaker_map_failures(manifest_rows: list[dict[str, str]]) -> list[str]:
+def speaker_map_failures(
+    manifest_rows: list[dict[str, str]], *, matched_only: bool = False
+) -> list[str]:
     """Return failures for missing or inconsistent exported speaker-map provenance."""
-    maps: dict[Path, dict[str, dict[str, str]] | None] = {}
+    maps: dict[Path, list[dict[str, str]] | None] = {}
+    manifest_indices: dict[Path, list[str]] = {}
     missing_maps = missing_rows = mismatched_speakers = unmatched_rows = 0
     for row in manifest_rows:
         audio_value = row.get("audio_path", "")
@@ -178,16 +181,18 @@ def speaker_map_failures(manifest_rows: list[dict[str, str]]) -> list[str]:
                 maps[map_path] = None
             else:
                 with map_path.open(encoding="utf-8-sig", newline="") as file:
-                    maps[map_path] = {
-                        row["srt_index"]: row for row in csv.DictReader(file) if row.get("srt_index")
-                    }
+                    maps[map_path] = [row for row in csv.DictReader(file) if row.get("srt_index")]
         speaker_rows = maps[map_path]
         if speaker_rows is None:
             missing_maps += 1
             continue
 
         srt_index = clip_id.split("_", 1)[0].lstrip("0") or "0"
-        speaker_row = speaker_rows.get(srt_index)
+        manifest_indices.setdefault(map_path, []).append(srt_index)
+        speaker_row = next(
+            (speaker_row for speaker_row in speaker_rows if speaker_row["srt_index"] == srt_index),
+            None,
+        )
         if speaker_row is None:
             missing_rows += 1
             continue
@@ -197,6 +202,55 @@ def speaker_map_failures(manifest_rows: list[dict[str, str]]) -> list[str]:
             mismatched_speakers += 1
 
     failures = []
+    duplicate_map_indices = []
+    duplicate_manifest_indices = []
+    missing_expected = []
+    unexpected_manifest = []
+    for map_path, indices in manifest_indices.items():
+        speaker_rows = maps[map_path]
+        if speaker_rows is None:
+            continue
+        chunk = map_path.parent.name
+        eligible_rows = [
+            row for row in speaker_rows if not matched_only or parse_bool(row.get("matched", ""))
+        ]
+        eligible_indices = [row["srt_index"] for row in eligible_rows]
+        duplicate_map_indices.extend(
+            f"{chunk}:{index}"
+            for index, count in Counter(eligible_indices).items()
+            if count > 1
+        )
+        duplicate_manifest_indices.extend(
+            f"{chunk}:{index}" for index, count in Counter(indices).items() if count > 1
+        )
+        expected_set = set(eligible_indices)
+        manifest_set = set(indices)
+        missing_expected.extend(
+            f"{chunk}:{index}" for index in sorted(expected_set - manifest_set, key=int)
+        )
+        unexpected_manifest.extend(
+            f"{chunk}:{index}" for index in sorted(manifest_set - expected_set, key=int)
+        )
+    if duplicate_map_indices:
+        failures.append(
+            f"{len(duplicate_map_indices)} duplicate eligible speaker-map indices: "
+            f"{sample(sorted(duplicate_map_indices))}"
+        )
+    if duplicate_manifest_indices:
+        failures.append(
+            f"{len(duplicate_manifest_indices)} duplicate per-chunk manifest indices: "
+            f"{sample(sorted(duplicate_manifest_indices))}"
+        )
+    if missing_expected:
+        failures.append(
+            f"{len(missing_expected)} expected speaker-map indices are missing from manifest: "
+            f"{sample(sorted(missing_expected))}"
+        )
+    if unexpected_manifest:
+        failures.append(
+            f"{len(unexpected_manifest)} manifest indices are absent from speaker maps: "
+            f"{sample(sorted(unexpected_manifest))}"
+        )
     if missing_maps:
         failures.append(f"{missing_maps} manifest rows have no speaker-map provenance file")
     if missing_rows:
@@ -217,6 +271,7 @@ def verify_manifest(
     check_files: bool = False,
     min_match_ratio: float = 0.0,
     check_speaker_maps: bool = False,
+    matched_only: bool = False,
 ) -> tuple[dict[str, int], list[str]]:
     """Verify an exported manifest and return metrics plus failures."""
     rows = read_tsv(manifest_path)
@@ -238,7 +293,7 @@ def verify_manifest(
             summary_failures(summaries, excluded_chunks=excluded, min_match_ratio=min_match_ratio)
         )
     if check_speaker_maps:
-        failures.extend(speaker_map_failures(rows))
+        failures.extend(speaker_map_failures(rows, matched_only=matched_only))
     metrics = {
         "manifest_rows": len(rows),
         "excluded_chunks": len(excluded),
@@ -285,6 +340,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Verify exported speaker_map.csv files exist and agree with manifest speakers.",
     )
+    parser.add_argument(
+        "--matched-only",
+        action="store_true",
+        help="Expect only speaker-map rows marked matched, mirroring export-aligned-map.",
+    )
     return parser.parse_args(argv)
 
 
@@ -299,6 +359,7 @@ def main(argv: list[str] | None = None) -> int:
         check_files=args.check_files,
         min_match_ratio=args.min_match_ratio,
         check_speaker_maps=args.check_speaker_maps,
+        matched_only=args.matched_only,
     )
     for key, value in metrics.items():
         print(f"{key}\t{value}")

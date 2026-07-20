@@ -31,7 +31,7 @@ alignment wer outputs/pez_001No0.tsv --top 20
 alignment align-map mapping.csv srt_dir build/aligned --use-transcript-speakers --infer-missing-speakers --require-diarized-matches --min-match-ratio 0.2
 alignment export-corpus chunk.wav outputs/pez_001No0.srt outputs/pez_001No0.srt outputs/clips outputs/manifest.tsv
 alignment export-aligned-map build/align-map-transcript-speakers-guarded hf-repo/cut_audio build/cut_samples-transcript-speakers --manifest build/cut_samples-transcript-speakers/manifest.tsv --require-diarized-matches --matched-only --min-match-ratio 0.2 --exclude-quality-failures build/align-map-transcript-speakers-guarded/quality_failures.tsv
-python tools/verify_export_manifest.py build/cut_samples-transcript-speakers/manifest.tsv --summary-root build/align-map-transcript-speakers-guarded --quality-failures build/align-map-transcript-speakers-guarded/quality_failures.tsv --min-match-ratio 0.2 --check-files --check-speaker-maps
+python tools/verify_export_manifest.py build/cut_samples-transcript-speakers/manifest.tsv --summary-root build/align-map-transcript-speakers-guarded --quality-failures build/align-map-transcript-speakers-guarded/quality_failures.tsv --min-match-ratio 0.2 --check-files --check-speaker-maps --matched-only
 ```
 
 Write derived files under `build/` or `outputs/`. Keep files in `data/` as source fixtures.
@@ -118,13 +118,16 @@ audio root or export job should cover only a subset.
 
 `tools/verify_export_manifest.py` verifies the final exported manifest against `summary.tsv` and
 an optional `quality_failures.tsv`. It checks the manifest row count, rejects blank speakers,
-rejects leftover `[SPEAKER_*]` labels, and confirms that chunks excluded by quality audit are not
-present in final outputs. Use the same repeated `--corpus` filters as the export command when
-verifying a subset export. Add `--check-files` after real exports to verify that referenced audio
-and caption files exist and that caption files match the manifest text fields. Add
+rejects leftover `[SPEAKER_*]` labels, rejects duplicate clip IDs or output paths, and confirms that
+chunks excluded by quality audit are not present in final outputs. Use the same repeated `--corpus`
+filters as the export command when verifying a subset export. Add `--check-files` after real exports
+to verify that referenced audio and caption files exist and that caption files match the manifest
+text fields. Add
 `--min-match-ratio` to reject any non-excluded chunks whose alignment coverage is below the final
 export threshold. Add `--check-speaker-maps` for final diarized exports to verify that each manifest
-row is backed by an exported `speaker_map.csv` row with the same transcript-derived speaker.
+row is backed by an exported `speaker_map.csv` row with the same transcript-derived speaker and to
+reconcile manifest and speaker-map indices per chunk. When the corpus was exported with
+`--matched-only`, pass the same flag to the verifier so unmatched speaker-map rows are not expected.
 
 `align-embeddings` is an optional side path for the old embedding experiment. It removes bracketed interviewer prompts, segments dialect text around pauses, and aligns segment pairs with a lazily loaded `sentence-transformers` model. It is not the default aligner, and normal parser/alignment tests do not require external models.
 

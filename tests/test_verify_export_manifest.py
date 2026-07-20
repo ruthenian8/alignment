@@ -198,6 +198,7 @@ def test_verify_manifest_reports_speaker_map_provenance_failures(tmp_path: Path)
     _, failures_found = verify_manifest(manifest, check_speaker_maps=True)
 
     assert failures_found == [
+        "1 manifest indices are absent from speaker maps: and_001No1:2",
         "1 manifest rows have no speaker-map provenance file",
         "1 manifest rows are absent from speaker-map provenance",
         "1 manifest rows point to unmatched speaker-map rows",
@@ -240,3 +241,89 @@ def test_verify_manifest_reports_duplicate_identity_fields(
     _, failures = verify_manifest(manifest)
 
     assert failures == [f"1 duplicate manifest {label}: {values[field]}"]
+
+
+def test_verify_manifest_reconciles_indices_when_total_count_is_balanced(tmp_path: Path) -> None:
+    chunk = tmp_path / "and_001" / "and_001No1"
+    chunk.mkdir(parents=True)
+    (chunk / "speaker_map.csv").write_text(
+        "srt_index,start,end,whisperx_speaker,transcript_speaker,speaker_source,matched,score\n"
+        "1,00:00:00,00:00:01,[SPEAKER_00]:,[АБ]:,marker,True,1.000\n"
+        "2,00:00:01,00:00:02,[SPEAKER_00]:,[АБ]:,marker,True,1.000\n",
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "manifest.tsv"
+    manifest.write_text(
+        "clip_id\taudio_path\tspeaker\n"
+        f"001_АБ_00-00-00-000\t{chunk / '001.wav'}\t[АБ]:\n"
+        f"003_АБ_00-00-02-000\t{chunk / '003.wav'}\t[АБ]:\n",
+        encoding="utf-8",
+    )
+
+    _, failures = verify_manifest(manifest, check_speaker_maps=True)
+
+    assert "1 expected speaker-map indices are missing from manifest: and_001No1:2" in failures
+    assert "1 manifest indices are absent from speaker maps: and_001No1:3" in failures
+
+
+def test_verify_manifest_matched_only_reconciles_only_matched_rows(tmp_path: Path) -> None:
+    chunk = tmp_path / "and_001" / "and_001No1"
+    chunk.mkdir(parents=True)
+    (chunk / "speaker_map.csv").write_text(
+        "srt_index,start,end,whisperx_speaker,transcript_speaker,speaker_source,matched,score\n"
+        "1,00:00:00,00:00:01,[SPEAKER_00]:,[АБ]:,marker,True,1.000\n"
+        "2,00:00:01,00:00:02,[SPEAKER_00]:,,unmatched,False,0.000\n",
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "manifest.tsv"
+    manifest.write_text(
+        "clip_id\taudio_path\tspeaker\n"
+        f"001_АБ_00-00-00-000\t{chunk / '001.wav'}\t[АБ]:\n",
+        encoding="utf-8",
+    )
+
+    _, failures = verify_manifest(manifest, check_speaker_maps=True, matched_only=True)
+
+    assert failures == []
+
+
+def test_verify_manifest_reports_duplicate_speaker_map_indices(tmp_path: Path) -> None:
+    chunk = tmp_path / "and_001" / "and_001No1"
+    chunk.mkdir(parents=True)
+    (chunk / "speaker_map.csv").write_text(
+        "srt_index,start,end,whisperx_speaker,transcript_speaker,speaker_source,matched,score\n"
+        "1,00:00:00,00:00:01,[SPEAKER_00]:,[АБ]:,marker,True,1.000\n"
+        "1,00:00:01,00:00:02,[SPEAKER_00]:,[АБ]:,marker,True,1.000\n",
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "manifest.tsv"
+    manifest.write_text(
+        "clip_id\taudio_path\tspeaker\n"
+        f"001_АБ_00-00-00-000\t{chunk / '001.wav'}\t[АБ]:\n",
+        encoding="utf-8",
+    )
+
+    _, failures = verify_manifest(manifest, check_speaker_maps=True)
+
+    assert "1 duplicate eligible speaker-map indices: and_001No1:1" in failures
+
+
+def test_verify_manifest_reports_duplicate_per_chunk_manifest_indices(tmp_path: Path) -> None:
+    chunk = tmp_path / "and_001" / "and_001No1"
+    chunk.mkdir(parents=True)
+    (chunk / "speaker_map.csv").write_text(
+        "srt_index,start,end,whisperx_speaker,transcript_speaker,speaker_source,matched,score\n"
+        "1,00:00:00,00:00:01,[SPEAKER_00]:,[АБ]:,marker,True,1.000\n",
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "manifest.tsv"
+    manifest.write_text(
+        "clip_id\taudio_path\tspeaker\n"
+        f"001_АБ_00-00-00-000\t{chunk / '001-a.wav'}\t[АБ]:\n"
+        f"001_АБ_00-00-00-001\t{chunk / '001-b.wav'}\t[АБ]:\n",
+        encoding="utf-8",
+    )
+
+    _, failures = verify_manifest(manifest, check_speaker_maps=True)
+
+    assert "1 duplicate per-chunk manifest indices: and_001No1:1" in failures
