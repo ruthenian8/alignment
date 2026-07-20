@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from tools.verify_export_manifest import verify_manifest
 
 
@@ -201,3 +203,40 @@ def test_verify_manifest_reports_speaker_map_provenance_failures(tmp_path: Path)
         "1 manifest rows point to unmatched speaker-map rows",
         "1 manifest speakers differ from speaker-map provenance",
     ]
+
+
+@pytest.mark.parametrize(
+    ("field", "label"),
+    [
+        ("clip_id", "clip IDs"),
+        ("audio_path", "audio paths"),
+        ("text_path", "text paths"),
+        ("text_original_path", "original-text paths"),
+    ],
+)
+def test_verify_manifest_reports_duplicate_identity_fields(
+    tmp_path: Path, field: str, label: str
+) -> None:
+    values = {
+        "clip_id": "001_АБ_00-00-00-000",
+        "audio_path": "/out/chunk/001.wav",
+        "text_path": "/out/chunk/001.txt",
+        "text_original_path": "/out/chunk/001_orig.txt",
+        "speaker": "[АБ]:",
+    }
+    second = {key: f"{value}.other" for key, value in values.items()}
+    second["speaker"] = "[АБ]:"
+    second[field] = values[field]
+    manifest = tmp_path / "manifest.tsv"
+    manifest.write_text(
+        "\t".join(values) + "\n"
+        + "\t".join(values.values())
+        + "\n"
+        + "\t".join(second.values())
+        + "\n",
+        encoding="utf-8",
+    )
+
+    _, failures = verify_manifest(manifest)
+
+    assert failures == [f"1 duplicate manifest {label}: {values[field]}"]

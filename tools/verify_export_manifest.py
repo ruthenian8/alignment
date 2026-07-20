@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import csv
 import sys
+from collections import Counter
 from pathlib import Path
 
 
@@ -71,6 +72,25 @@ def sample(items: list[str], limit: int = 5) -> str:
     return text
 
 
+def duplicate_value_failures(rows: list[dict[str, str]]) -> list[str]:
+    """Return failures for duplicate non-empty manifest identities and paths."""
+    fields = {
+        "clip_id": "clip IDs",
+        "audio_path": "audio paths",
+        "text_path": "text paths",
+        "text_original_path": "original-text paths",
+    }
+    failures = []
+    for field, label in fields.items():
+        counts = Counter(row.get(field, "").strip() for row in rows)
+        duplicates = sorted(value for value, count in counts.items() if value and count > 1)
+        if duplicates:
+            failures.append(
+                f"{len(duplicates)} duplicate manifest {label}: {sample(duplicates)}"
+            )
+    return failures
+
+
 def manifest_failures(
     manifest_rows: list[dict[str, str]],
     *,
@@ -82,6 +102,7 @@ def manifest_failures(
     failures = []
     if expected_rows is not None and len(manifest_rows) != expected_rows:
         failures.append(f"manifest rows {len(manifest_rows)} != expected {expected_rows}")
+    failures.extend(duplicate_value_failures(manifest_rows))
     blank_speakers = sum(not row.get("speaker", "").strip() for row in manifest_rows)
     if blank_speakers:
         failures.append(f"{blank_speakers} manifest rows have blank speakers")
