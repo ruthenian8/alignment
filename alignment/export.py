@@ -226,7 +226,7 @@ def _plan_srt_segments(
 def _validate_export_plans(plans: list[ExportPlan]) -> None:
     """Reject collisions and conflicting deterministic reruns before writes."""
     fields = {
-        "clip IDs": [plan.clip_id for plan in plans],
+        "clip IDs": [str(plan.audio_path.parent / plan.clip_id) for plan in plans],
         "audio paths": [str(plan.audio_path) for plan in plans],
         "text paths": [str(plan.text_path) for plan in plans],
         "original-text paths": [str(plan.original_text_path) for plan in plans],
@@ -375,7 +375,8 @@ def export_aligned_srt_tree(
     aligned_base = Path(aligned_root)
     audio_base = Path(audio_root)
     output_base = Path(output_root)
-    rows = []
+    plans: list[ExportPlan] = []
+    speaker_map_copies: list[tuple[Path, Path]] = []
     ratio_cache: dict[str, dict[str, float]] = {}
     excluded_chunks = quality_failure_chunks(exclude_quality_failures) if exclude_quality_failures else set()
     aligned_files = []
@@ -417,30 +418,43 @@ def export_aligned_srt_tree(
         if not audio_path.exists():
             raise FileNotFoundError(f"Missing chunk audio for {aligned_srt}: {audio_path}")
         speaker_map = aligned_base / corpus / "speaker_maps" / f"{chunk}.speaker_map.csv"
+        segments = parse_srt(aligned_srt.read_text(encoding="utf-8-sig"))
+        _segments_by_unique_index(segments, f"{chunk} aligned")
         if require_diarized_matches:
             if not speaker_map.exists():
                 raise ValueError(f"Missing speaker map for diarization guard: {speaker_map}")
-            segments = parse_srt(aligned_srt.read_text(encoding="utf-8-sig"))
             missing_indices = {segment.index for segment in segments} - speaker_map_indices(speaker_map)
             if missing_indices:
                 missing_text = ", ".join(str(index) for index in sorted(missing_indices))
                 raise ValueError(f"Speaker map lacks rows for SRT indices {missing_text}: {speaker_map}")
             if has_matched_blank_speakers(speaker_map):
                 raise ValueError(f"Matched segments without transcript speakers in {speaker_map}")
-        rows.extend(
-            export_aligned_srt(
+        if matched_only:
+            if not speaker_map.exists():
+                raise ValueError("--matched-only export requires a speaker map")
+            matched_indices = speaker_map_matched_indices(speaker_map)
+            segments = [segment for segment in segments if segment.index in matched_indices]
+        if speaker_map.exists():
+            segments = apply_speaker_map(segments, speaker_map_by_index(speaker_map))
+        clean_text_by_index = {
+            segment.index: normalize_caption_text(segment.text) for segment in segments
+        }
+        target_dir = output_base / corpus / chunk
+        plans.extend(
+            _plan_srt_segments(
                 audio_path,
-                aligned_srt,
-                output_base / corpus / chunk,
-                speaker_map_path=speaker_map,
-                matched_only=matched_only,
-                run=run,
+                segments,
+                target_dir,
+                text_by_index=clean_text_by_index,
             )
         )
         if speaker_map.exists():
-            target_dir = output_base / corpus / chunk
-            target_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(speaker_map, target_dir / "speaker_map.csv")
+            speaker_map_copies.append((speaker_map, target_dir))
+    _validate_export_plans(plans)
+    rows = _execute_export_plans(plans, run=run)
+    for speaker_map, target_dir in speaker_map_copies:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(speaker_map, target_dir / "speaker_map.csv")
     if manifest_path is not None:
         write_tsv(manifest_path, rows, MANIFEST_COLUMNS)
     return rows

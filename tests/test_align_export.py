@@ -766,6 +766,33 @@ def test_export_aligned_srt_tree_can_exclude_quality_failures(tmp_path: Path):
     assert not (tmp_path / "cut_samples" / "and_001" / "and_001No2").exists()
 
 
+def test_export_tree_preflights_later_chunks_before_writing(tmp_path: Path):
+    aligned_root = tmp_path / "aligned"
+    audio_root = tmp_path / "audio"
+    output_root = tmp_path / "output"
+    for chunk, text in (("and_001No1", "first"), ("and_001No2", "second")):
+        aligned_dir = aligned_root / "and_001" / "aligned"
+        audio_dir = audio_root / "and_001"
+        aligned_dir.mkdir(parents=True, exist_ok=True)
+        audio_dir.mkdir(parents=True, exist_ok=True)
+        (audio_dir / f"{chunk}.wav").write_bytes(b"wav")
+        (aligned_dir / f"{chunk}.aligned.srt").write_text(
+            f"1\n00:00:00,000 --> 00:00:01,000\n[SPEAKER_00]: {text}\n",
+            encoding="utf-8",
+        )
+    conflict = output_root / "and_001" / "and_001No2" / "001_SPEAKER_00_00-00-00-000.txt"
+    conflict.parent.mkdir(parents=True)
+    conflict.write_text("conflicting old caption", encoding="utf-8")
+
+    with patch("alignment.export.subprocess.run") as run:
+        with pytest.raises(ValueError, match="existing caption conflicts"):
+            export_aligned_srt_tree(aligned_root, audio_root, output_root)
+
+    run.assert_not_called()
+    first = output_root / "and_001" / "and_001No1" / "001_SPEAKER_00_00-00-00-000.txt"
+    assert not first.exists()
+
+
 def test_summary_match_ratios_falls_back_to_matched_segment_counts(tmp_path: Path):
     summary = tmp_path / "summary.tsv"
     summary.write_text(
