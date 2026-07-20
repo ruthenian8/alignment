@@ -215,9 +215,7 @@ def test_verify_manifest_reports_speaker_map_provenance_failures(tmp_path: Path)
         ("text_original_path", "original-text paths"),
     ],
 )
-def test_verify_manifest_reports_duplicate_identity_fields(
-    tmp_path: Path, field: str, label: str
-) -> None:
+def test_verify_manifest_reports_duplicate_identity_fields(tmp_path: Path, field: str, label: str) -> None:
     values = {
         "clip_id": "001_АБ_00-00-00-000",
         "audio_path": "/out/chunk/001.wav",
@@ -230,11 +228,7 @@ def test_verify_manifest_reports_duplicate_identity_fields(
     second[field] = values[field]
     manifest = tmp_path / "manifest.tsv"
     manifest.write_text(
-        "\t".join(values) + "\n"
-        + "\t".join(values.values())
-        + "\n"
-        + "\t".join(second.values())
-        + "\n",
+        "\t".join(values) + "\n" + "\t".join(values.values()) + "\n" + "\t".join(second.values()) + "\n",
         encoding="utf-8",
     )
 
@@ -277,8 +271,7 @@ def test_verify_manifest_matched_only_reconciles_only_matched_rows(tmp_path: Pat
     )
     manifest = tmp_path / "manifest.tsv"
     manifest.write_text(
-        "clip_id\taudio_path\tspeaker\n"
-        f"001_АБ_00-00-00-000\t{chunk / '001.wav'}\t[АБ]:\n",
+        f"clip_id\taudio_path\tspeaker\n001_АБ_00-00-00-000\t{chunk / '001.wav'}\t[АБ]:\n",
         encoding="utf-8",
     )
 
@@ -298,8 +291,7 @@ def test_verify_manifest_reports_duplicate_speaker_map_indices(tmp_path: Path) -
     )
     manifest = tmp_path / "manifest.tsv"
     manifest.write_text(
-        "clip_id\taudio_path\tspeaker\n"
-        f"001_АБ_00-00-00-000\t{chunk / '001.wav'}\t[АБ]:\n",
+        f"clip_id\taudio_path\tspeaker\n001_АБ_00-00-00-000\t{chunk / '001.wav'}\t[АБ]:\n",
         encoding="utf-8",
     )
 

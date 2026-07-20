@@ -17,6 +17,7 @@ from alignment.audio import build_cut_command
 from alignment.cli import main
 from alignment.export import (
     clean_speaker_code,
+    export_aligned_srt,
     export_aligned_srt_tree,
     export_segments,
     normalize_caption_text,
@@ -506,6 +507,23 @@ def test_plan_validation_rejects_duplicate_output_paths(tmp_path: Path):
 
     with pytest.raises(ValueError, match="duplicate clip IDs"):
         _validate_export_plans([plan, replace(plan, segment=replace(segment, index=2))])
+
+
+def test_export_aligned_srt_rejects_duplicate_indices_before_writing(tmp_path: Path):
+    aligned_srt = tmp_path / "chunk.aligned.srt"
+    aligned_srt.write_text(
+        "1\n00:00:00,000 --> 00:00:01,000\n[SPEAKER_00]: first\n\n"
+        "1\n00:00:01,000 --> 00:00:02,000\n[SPEAKER_00]: second\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "output"
+
+    with patch("alignment.export.subprocess.run") as run:
+        with pytest.raises(ValueError, match="duplicate aligned SRT indices: 1"):
+            export_aligned_srt("input.wav", aligned_srt, output)
+
+    run.assert_not_called()
+    assert not output.exists()
 
 
 def test_m4a_input_exports_wav_with_transcoding(tmp_path: Path):

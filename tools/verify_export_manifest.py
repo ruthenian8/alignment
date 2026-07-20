@@ -85,9 +85,7 @@ def duplicate_value_failures(rows: list[dict[str, str]]) -> list[str]:
         counts = Counter(row.get(field, "").strip() for row in rows)
         duplicates = sorted(value for value, count in counts.items() if value and count > 1)
         if duplicates:
-            failures.append(
-                f"{len(duplicates)} duplicate manifest {label}: {sample(duplicates)}"
-            )
+            failures.append(f"{len(duplicates)} duplicate manifest {label}: {sample(duplicates)}")
     return failures
 
 
@@ -161,9 +159,7 @@ def parse_bool(value: str) -> bool:
     return value.strip().lower() in {"true", "1", "yes", "y"}
 
 
-def speaker_map_failures(
-    manifest_rows: list[dict[str, str]], *, matched_only: bool = False
-) -> list[str]:
+def speaker_map_failures(manifest_rows: list[dict[str, str]], *, matched_only: bool = False) -> list[str]:
     """Return failures for missing or inconsistent exported speaker-map provenance."""
     maps: dict[Path, list[dict[str, str]] | None] = {}
     manifest_indices: dict[Path, list[str]] = {}
@@ -216,18 +212,14 @@ def speaker_map_failures(
         ]
         eligible_indices = [row["srt_index"] for row in eligible_rows]
         duplicate_map_indices.extend(
-            f"{chunk}:{index}"
-            for index, count in Counter(eligible_indices).items()
-            if count > 1
+            f"{chunk}:{index}" for index, count in Counter(eligible_indices).items() if count > 1
         )
         duplicate_manifest_indices.extend(
             f"{chunk}:{index}" for index, count in Counter(indices).items() if count > 1
         )
         expected_set = set(eligible_indices)
         manifest_set = set(indices)
-        missing_expected.extend(
-            f"{chunk}:{index}" for index in sorted(expected_set - manifest_set, key=int)
-        )
+        missing_expected.extend(f"{chunk}:{index}" for index in sorted(expected_set - manifest_set, key=int))
         unexpected_manifest.extend(
             f"{chunk}:{index}" for index in sorted(manifest_set - expected_set, key=int)
         )

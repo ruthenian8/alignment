@@ -171,9 +171,7 @@ def _sample(items: list[str], limit: int = 5) -> str:
     return sample
 
 
-def _segments_by_unique_index(
-    segments: list[SrtSegment], label: str
-) -> dict[int, SrtSegment]:
+def _segments_by_unique_index(segments: list[SrtSegment], label: str) -> dict[int, SrtSegment]:
     """Index segments while rejecting duplicate SRT indices."""
     indexed: dict[int, SrtSegment] = {}
     duplicates: set[int] = set()
@@ -247,9 +245,7 @@ def _validate_export_plans(plans: list[ExportPlan]) -> None:
         raise ValueError("; ".join(failures))
 
 
-def _execute_export_plans(
-    plans: list[ExportPlan], *, run: bool = True
-) -> list[dict[str, str]]:
+def _execute_export_plans(plans: list[ExportPlan], *, run: bool = True) -> list[dict[str, str]]:
     """Execute validated export plans and return manifest rows."""
     for plan in plans:
         plan.audio_path.parent.mkdir(parents=True, exist_ok=True)
@@ -299,9 +295,7 @@ def export_segments(
         if missing:
             parts.append(f"missing clean indices: {_sample([str(index) for index in missing])}")
         if unexpected:
-            parts.append(
-                f"unexpected clean indices: {_sample([str(index) for index in unexpected])}"
-            )
+            parts.append(f"unexpected clean indices: {_sample([str(index) for index in unexpected])}")
         raise ValueError("; ".join(parts))
     clean_text_by_index = {index: segment.text for index, segment in clean_by_index.items()}
     return _export_srt_segments(
@@ -341,6 +335,7 @@ def export_aligned_srt(
 ) -> list[dict[str, str]]:
     """Cut one aligned SRT into wav, normalized txt, and original _orig.txt files."""
     segments = parse_srt(Path(aligned_srt_path).read_text(encoding="utf-8-sig"))
+    _segments_by_unique_index(segments, "aligned")
     if matched_only:
         if speaker_map_path is None:
             raise ValueError("--matched-only export requires a speaker map")
@@ -436,9 +431,7 @@ def export_aligned_srt_tree(
             segments = [segment for segment in segments if segment.index in matched_indices]
         if speaker_map.exists():
             segments = apply_speaker_map(segments, speaker_map_by_index(speaker_map))
-        clean_text_by_index = {
-            segment.index: normalize_caption_text(segment.text) for segment in segments
-        }
+        clean_text_by_index = {segment.index: normalize_caption_text(segment.text) for segment in segments}
         target_dir = output_base / corpus / chunk
         plans.extend(
             _plan_srt_segments(
