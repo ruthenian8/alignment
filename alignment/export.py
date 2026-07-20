@@ -142,6 +142,22 @@ def _sample(items: list[str], limit: int = 5) -> str:
     return sample
 
 
+def _segments_by_unique_index(
+    segments: list[SrtSegment], label: str
+) -> dict[int, SrtSegment]:
+    """Index segments while rejecting duplicate SRT indices."""
+    indexed: dict[int, SrtSegment] = {}
+    duplicates: set[int] = set()
+    for segment in segments:
+        if segment.index in indexed:
+            duplicates.add(segment.index)
+        indexed[segment.index] = segment
+    if duplicates:
+        values = [str(index) for index in sorted(duplicates)]
+        raise ValueError(f"duplicate {label} SRT indices: {_sample(values)}")
+    return indexed
+
+
 def _export_srt_segments(
     input_audio: Path | str,
     segments: list[SrtSegment],
@@ -197,7 +213,20 @@ def export_segments(
     """Cut audio clips and write original/clean text files from paired SRT strings."""
     original_segments = parse_srt(original_srt)
     clean_segments = parse_srt(clean_srt)
-    clean_text_by_index = {segment.index: segment.text for segment in clean_segments}
+    original_by_index = _segments_by_unique_index(original_segments, "original")
+    clean_by_index = _segments_by_unique_index(clean_segments, "clean")
+    missing = sorted(original_by_index.keys() - clean_by_index.keys())
+    unexpected = sorted(clean_by_index.keys() - original_by_index.keys())
+    if missing or unexpected:
+        parts = ["paired SRT index mismatch"]
+        if missing:
+            parts.append(f"missing clean indices: {_sample([str(index) for index in missing])}")
+        if unexpected:
+            parts.append(
+                f"unexpected clean indices: {_sample([str(index) for index in unexpected])}"
+            )
+        raise ValueError("; ".join(parts))
+    clean_text_by_index = {index: segment.text for index, segment in clean_by_index.items()}
     return _export_srt_segments(
         input_audio,
         original_segments,

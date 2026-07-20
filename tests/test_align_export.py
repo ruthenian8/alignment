@@ -427,6 +427,42 @@ def test_export_builds_deterministic_names_and_ffmpeg_commands(tmp_path: Path):
     )
 
 
+@pytest.mark.parametrize("side", ["original", "clean"])
+def test_export_segments_rejects_duplicate_srt_indices(tmp_path: Path, side: str):
+    duplicate = (
+        "1\n00:00:00,000 --> 00:00:01,000\n[SPEAKER_00]: first\n\n"
+        "1\n00:00:01,000 --> 00:00:02,000\n[SPEAKER_00]: second\n"
+    )
+    single = "1\n00:00:00,000 --> 00:00:01,000\n[SPEAKER_00]: only\n"
+    original, clean = (duplicate, single) if side == "original" else (single, duplicate)
+
+    with patch("alignment.export.subprocess.run") as run:
+        with pytest.raises(ValueError, match=rf"duplicate {side} SRT indices: 1"):
+            export_segments("input.wav", original, clean, tmp_path)
+
+    run.assert_not_called()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_export_segments_requires_identical_srt_index_sets(tmp_path: Path):
+    original = (
+        "1\n00:00:00,000 --> 00:00:01,000\n[SPEAKER_00]: first\n\n"
+        "2\n00:00:01,000 --> 00:00:02,000\n[SPEAKER_00]: second\n"
+    )
+    clean = (
+        "1\n00:00:00,000 --> 00:00:01,000\n[SPEAKER_00]: clean first\n\n"
+        "3\n00:00:01,000 --> 00:00:02,000\n[SPEAKER_00]: clean extra\n"
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"paired SRT index mismatch; missing clean indices: 2; unexpected clean indices: 3",
+    ):
+        export_segments("input.wav", original, clean, tmp_path, run=False)
+
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_m4a_input_exports_wav_with_transcoding(tmp_path: Path):
     command = build_cut_command("input.m4a", tmp_path / "clip.wav", "00:00:00.000", "00:00:01.250")
     assert command[-3:] == ["-c:a", "pcm_s16le", str(tmp_path / "clip.wav")]
