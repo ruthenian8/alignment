@@ -6,6 +6,8 @@ import csv
 import re
 import shutil
 import subprocess
+from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 
 from .audio import build_cut_command
@@ -13,6 +15,33 @@ from .io import MANIFEST_COLUMNS, write_tsv
 from .srt import SrtSegment, normalize_timestamp, parse_srt
 
 STRESS_MARK_RE = re.compile(r"[\\_\u0300\u0301]")
+
+
+@dataclass(frozen=True)
+class ExportPlan:
+    """One validated clip export operation."""
+
+    segment: SrtSegment
+    clip_id: str
+    audio_path: Path
+    text_path: Path
+    original_text_path: Path
+    text: str
+    command: list[str]
+
+    def manifest_row(self) -> dict[str, str]:
+        """Return the manifest row represented by this plan."""
+        return {
+            "clip_id": self.clip_id,
+            "audio_path": str(self.audio_path),
+            "text_path": str(self.text_path),
+            "text_original_path": str(self.original_text_path),
+            "start": normalize_timestamp(self.segment.start, decimal="."),
+            "end": normalize_timestamp(self.segment.end, decimal="."),
+            "speaker": self.segment.speaker,
+            "text": self.text,
+            "text_original": self.segment.text,
+        }
 
 
 def safe_time(timestamp: str) -> str:
@@ -158,18 +187,16 @@ def _segments_by_unique_index(
     return indexed
 
 
-def _export_srt_segments(
+def _plan_srt_segments(
     input_audio: Path | str,
     segments: list[SrtSegment],
     output_dir: Path | str,
     *,
     text_by_index: dict[int, str] | None = None,
-    run: bool = True,
-) -> list[dict[str, str]]:
-    """Cut audio and write paired normalized/original text files for SRT segments."""
+) -> list[ExportPlan]:
+    """Build side-effect-free export plans for SRT segments."""
     output = Path(output_dir)
-    output.mkdir(parents=True, exist_ok=True)
-    manifest = []
+    plans = []
     for segment in segments:
         base = clip_id(segment)
         audio_path = output / f"{base}.wav"
@@ -181,25 +208,75 @@ def _export_srt_segments(
             normalize_timestamp(segment.start, decimal="."),
             normalize_timestamp(segment.end, decimal="."),
         )
-        if run:
-            subprocess.run(command, check=True)
         text = text_by_index.get(segment.index, segment.text) if text_by_index is not None else segment.text
-        text_path.write_text(text, encoding="utf-8")
-        original_text_path.write_text(segment.text, encoding="utf-8")
-        manifest.append(
-            {
-                "clip_id": base,
-                "audio_path": str(audio_path),
-                "text_path": str(text_path),
-                "text_original_path": str(original_text_path),
-                "start": normalize_timestamp(segment.start, decimal="."),
-                "end": normalize_timestamp(segment.end, decimal="."),
-                "speaker": segment.speaker,
-                "text": text,
-                "text_original": segment.text,
-            }
+        plans.append(
+            ExportPlan(
+                segment=segment,
+                clip_id=base,
+                audio_path=audio_path,
+                text_path=text_path,
+                original_text_path=original_text_path,
+                text=text,
+                command=command,
+            )
         )
-    return manifest
+    return plans
+
+
+def _validate_export_plans(plans: list[ExportPlan]) -> None:
+    """Reject collisions and conflicting deterministic reruns before writes."""
+    fields = {
+        "clip IDs": [plan.clip_id for plan in plans],
+        "audio paths": [str(plan.audio_path) for plan in plans],
+        "text paths": [str(plan.text_path) for plan in plans],
+        "original-text paths": [str(plan.original_text_path) for plan in plans],
+    }
+    failures = []
+    for label, values in fields.items():
+        duplicates = sorted(value for value, count in Counter(values).items() if count > 1)
+        if duplicates:
+            failures.append(f"duplicate {label}: {_sample(duplicates)}")
+    for plan in plans:
+        for path, expected in (
+            (plan.text_path, plan.text),
+            (plan.original_text_path, plan.segment.text),
+        ):
+            if path.exists() and path.read_text(encoding="utf-8") != expected:
+                failures.append(f"existing caption conflicts with planned text: {path}")
+    if failures:
+        raise ValueError("; ".join(failures))
+
+
+def _execute_export_plans(
+    plans: list[ExportPlan], *, run: bool = True
+) -> list[dict[str, str]]:
+    """Execute validated export plans and return manifest rows."""
+    for plan in plans:
+        plan.audio_path.parent.mkdir(parents=True, exist_ok=True)
+        if run:
+            subprocess.run(plan.command, check=True)
+        plan.text_path.write_text(plan.text, encoding="utf-8")
+        plan.original_text_path.write_text(plan.segment.text, encoding="utf-8")
+    return [plan.manifest_row() for plan in plans]
+
+
+def _export_srt_segments(
+    input_audio: Path | str,
+    segments: list[SrtSegment],
+    output_dir: Path | str,
+    *,
+    text_by_index: dict[int, str] | None = None,
+    run: bool = True,
+) -> list[dict[str, str]]:
+    """Validate and export paired normalized/original text for SRT segments."""
+    plans = _plan_srt_segments(
+        input_audio,
+        segments,
+        output_dir,
+        text_by_index=text_by_index,
+    )
+    _validate_export_plans(plans)
+    return _execute_export_plans(plans, run=run)
 
 
 def export_segments(

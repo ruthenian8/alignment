@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -461,6 +462,50 @@ def test_export_segments_requires_identical_srt_index_sets(tmp_path: Path):
         export_segments("input.wav", original, clean, tmp_path, run=False)
 
     assert list(tmp_path.iterdir()) == []
+
+
+def test_export_rejects_conflicting_existing_caption_before_ffmpeg(tmp_path: Path):
+    base = "001_SPEAKER_00_00-00-00-000"
+    (tmp_path / f"{base}.txt").write_text("older text", encoding="utf-8")
+    original = "1\n00:00:00,000 --> 00:00:01,000\n[SPEAKER_00]: original\n"
+    clean = "1\n00:00:00,000 --> 00:00:01,000\n[SPEAKER_00]: replacement\n"
+
+    with patch("alignment.export.subprocess.run") as run:
+        with pytest.raises(ValueError, match="existing caption conflicts"):
+            export_segments("input.wav", original, clean, tmp_path)
+
+    run.assert_not_called()
+    assert (tmp_path / f"{base}.txt").read_text(encoding="utf-8") == "older text"
+
+
+def test_export_allows_identical_existing_captions_on_rerun(tmp_path: Path):
+    original = "1\n00:00:00,000 --> 00:00:01,000\n[SPEAKER_00]: original\n"
+    clean = "1\n00:00:00,000 --> 00:00:01,000\n[SPEAKER_00]: clean\n"
+    export_segments("input.wav", original, clean, tmp_path, run=False)
+
+    with patch("alignment.export.subprocess.run") as run:
+        rows = export_segments("input.wav", original, clean, tmp_path)
+
+    assert len(rows) == 1
+    run.assert_called_once()
+
+
+def test_plan_validation_rejects_duplicate_output_paths(tmp_path: Path):
+    from alignment.export import ExportPlan, _validate_export_plans
+
+    segment = SrtSegment(1, "00:00:00,000", "00:00:01,000", "[АБ]:", "one")
+    plan = ExportPlan(
+        segment=segment,
+        clip_id="001_АБ_00-00-00-000",
+        audio_path=tmp_path / "same.wav",
+        text_path=tmp_path / "same.txt",
+        original_text_path=tmp_path / "same_orig.txt",
+        text="one",
+        command=["ffmpeg"],
+    )
+
+    with pytest.raises(ValueError, match="duplicate clip IDs"):
+        _validate_export_plans([plan, replace(plan, segment=replace(segment, index=2))])
 
 
 def test_m4a_input_exports_wav_with_transcoding(tmp_path: Path):
