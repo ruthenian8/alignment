@@ -21,7 +21,7 @@ from .reorder import normalize_for_match
 from .srt import SrtSegment, format_srt, parse_srt
 
 SPEAKER_MARKER_RE = re.compile(r"\[([^\]]{1,300}):\]")
-SPEAKER_CODE_RE = re.compile(r"[A-ZА-ЯЁ]{1,6}|\?{3}")
+SPEAKER_CODE_RE = re.compile(r"[A-ZА-ЯЁ]{1,6}(?:-\d+)?|\?{3}")
 UNKNOWN_SPEAKER = "UNK"
 
 

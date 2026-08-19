@@ -201,6 +201,10 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# Private speaker-pseudonymization tooling and reversible registry data.
+private_tools/
+private_registry/
+
 # Marimo
 marimo/_static/
 marimo/_lsp/

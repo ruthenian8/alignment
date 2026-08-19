@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 BRACKET_RE = re.compile(r"\[([^\]]+)\]")
-SPEAKER_CODE_RE = re.compile(r"[A-ZА-ЯЁ]{1,6}|\?{3}")
+SPEAKER_CODE_RE = re.compile(r"[A-ZА-ЯЁ]{1,6}(?:-\d+)?|\?{3}")
 REFERENCE_RE = re.compile(
     r"\bсм\.|[IVXLCDMХVI]+[aа]?-?\d+|граф\.\s*файл|\bфайл\b|нрзб\.\s*\d{1,2}:\d{2}",
     re.IGNORECASE,

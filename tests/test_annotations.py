@@ -88,6 +88,7 @@ def test_real_bracket_examples_classify_by_rule(expected: BracketKind, span: str
 
 def test_classifies_speaker_and_collector_brackets() -> None:
     assert classify_bracket_text("Л:") == BracketKind.SPEAKER_TAG
+    assert classify_bracket_text("АИ-1:") == BracketKind.SPEAKER_TAG
     assert classify_bracket_text("МВ, ???:") == BracketKind.SPEAKER_TAG
     assert classify_bracket_text("Соб.: Да.") == BracketKind.COLLECTOR_UTTERANCE
     assert classify_bracket_text("А где это было?") == BracketKind.COLLECTOR_UTTERANCE
