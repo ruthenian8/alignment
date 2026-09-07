@@ -30,22 +30,16 @@ alignment align-embeddings data/whisper_srt/pez_001/pez_001No0.srt transcript.tx
 alignment wer outputs/pez_001No0.tsv --top 20
 alignment align-map mapping.csv srt_dir build/aligned --use-transcript-speakers --infer-missing-speakers --require-diarized-matches --min-match-ratio 0.2
 alignment export-corpus chunk.wav outputs/pez_001No0.srt outputs/pez_001No0.srt outputs/clips outputs/manifest.tsv
-alignment export-aligned-map build/align-map-transcript-speakers-guarded hf-repo/cut_audio build/cut_samples-transcript-speakers --manifest build/cut_samples-transcript-speakers/manifest.tsv --require-diarized-matches --matched-only --min-match-ratio 0.2 --exclude-quality-failures build/align-map-transcript-speakers-guarded/quality_failures.tsv
-python tools/verify_export_manifest.py build/cut_samples-transcript-speakers/manifest.tsv --summary-root build/align-map-transcript-speakers-guarded --quality-failures build/align-map-transcript-speakers-guarded/quality_failures.tsv --min-match-ratio 0.2 --check-files --check-speaker-maps --matched-only
+alignment export-aligned-map build/aligned hf-repo/cut_audio outputs/cut_samples --manifest outputs/cut_samples/manifest.tsv --require-diarized-matches --matched-only --min-match-ratio 0.2 --exclude-quality-failures outputs/quality_failures.tsv
+python tools/verify_export_manifest.py outputs/cut_samples/manifest.tsv --summary-root build/aligned --quality-failures outputs/quality_failures.tsv --min-match-ratio 0.2 --check-files --check-speaker-maps --matched-only
 ```
 
 Write derived files under `build/` or `outputs/`. Keep files in `data/` as source fixtures.
 
-Verified final exports should use transcript-derived speaker labels, not WhisperX speaker codes. The
-current persisted outputs are:
+The retained corpus output is:
 
-- `build/cut_samples-transcript-speakers`: PEZ clips verified against
-  `build/align-map-transcript-speakers-guarded`.
-- `build/cut_samples-indexed-transcript-speakers`: indexed `and`, `pom`, and `uht` clips verified
-  against `build/align-map-indexed-transcript-speakers-guarded`.
+- `build/cut_samples-transcript-speakers`: PEZ clips.
 
-`build/cut_samples-srt-speakers` is a baseline layout with SRT/WhisperX speakers and should not be
-treated as the final diarized corpus.
 
 ## Schemas
 
@@ -111,7 +105,7 @@ or if a required speaker map is missing. By default, export preserves all aligne
 unmatched rows that fall back to the original SRT text. Add `--matched-only` to export only rows that
 were matched to manual transcript text. Add `--min-match-ratio` to make export re-check the
 `align-map` summary and fail low-coverage chunks even if the alignment stage was run without a gate.
-Add `--exclude-quality-failures build/aligned-with-speaker-maps/quality_failures.tsv` to skip chunks
+Add `--exclude-quality-failures outputs/quality_failures.tsv` to skip chunks
 already marked as missing, undiarized, or low-coverage by a speaker-map audit.
 Use repeated `--corpus` options when an aligned root contains multiple corpus directories but the
 audio root or export job should cover only a subset.
